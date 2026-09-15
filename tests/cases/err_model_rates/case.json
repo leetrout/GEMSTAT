@@ -1,0 +1,32 @@
+{
+  "args": [
+    "-s",
+    "@DATA@/seqs.fa",
+    "-e",
+    "@DATA@/expr.tab",
+    "-m",
+    "@DATA@/factors.wtmx",
+    "-f",
+    "@DATA@/factor_expr.tab",
+    "-i",
+    "@DATA@/factor_info.txt",
+    "-c",
+    "@DATA@/coop.txt",
+    "-o",
+    "Rates",
+    "-na",
+    "0",
+    "-fo",
+    "out.txt",
+    "-po",
+    "par.txt"
+  ],
+  "exit_code": 1,
+  "stderr_match": [
+    "Rates model is not implemented"
+  ],
+  "labels": [
+    "fast",
+    "error"
+  ]
+}

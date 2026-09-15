@@ -1,0 +1,1 @@
+User requested WEIGHTED_SSE objective, but provided no weights.

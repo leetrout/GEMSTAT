@@ -139,7 +139,7 @@ int writePredictions(const string& filename, ExprPredictor& predictor, const Mat
 				multiple_predictions.push_back(targetExprs);
 				multiple_observations.push_back(observedExprs);
 
-				error_or_score = predictor.trainingObjective->eval(multiple_predictions, multiple_observations, &par);
+				error_or_score = predictor.trainingObjective->eval(multiple_observations, multiple_predictions, &par);
 
         for ( int j = 0; j < predictor.nConds(); j++ ){
 						fout << "\t" << ( beta * targetExprs[j] );

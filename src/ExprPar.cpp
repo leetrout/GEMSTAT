@@ -1,4 +1,5 @@
 #include "ExprPar.h"
+#include <stdexcept>
 #include "ExprPredictor.h"
 #include "conf/ExprParConf.hpp"
 
@@ -19,7 +20,7 @@ string parameterSpaceStr(ThermodynamicParameterSpace in){
       return "ENERGY_SPACE";
     if(in == PROB_SPACE)
       return "PROB_SPACE";
-    assert(false);
+    throw std::invalid_argument("parameterSpaceStr: unknown ThermodynamicParameterSpace");
 }
 
 
@@ -357,7 +358,7 @@ ExprPar ParFactory::changeSpace(const ExprPar& in_par, const ThermodynamicParame
     return create_expr_par(as_constrained, CONSTRAINED_SPACE);
   }
 
-  assert(false);
+  throw std::invalid_argument("ParFactory::changeSpace: unknown target ThermodynamicParameterSpace");
 }
 
 void ParFactory::constrained_to_energy_helper(const vector<double>& pars, vector<double>& output, const vector<double>& low, const vector<double>& high) const
@@ -487,7 +488,7 @@ ExprPar ParFactory::load(const string& file){
 			ret_par = load_old(fin);
 		}
 		fin.close();
-	}catch( runtime_error the_error){
+	}catch( const runtime_error& the_error){
 		cerr << endl << " ** FATAL ERROR ** " << endl;
 		cerr << "There was an error while trying to load the file \"" << file << "\" " << endl;
 		cerr << "because: \"" << the_error.what() << endl;
@@ -517,7 +518,11 @@ ExprPar ParFactory::load(const string& file){
 
 ExprPar ParFactory::load_SNOT(istream& fin){
     ExprPar tmp_par = create_expr_par();
-    tmp_par = changeSpace(tmp_par, expr_model.modelOption == LOGISTIC ? ENERGY_SPACE : PROB_SPACE );
+    //Parameter files are written in PROB_SPACE for every model (see the note on
+    //ThermodynamicParameterSpace in ExprPar.h and ExprPar::print via seq2expr).
+    //The loader used to tag Logistic-model files as ENERGY_SPACE, which meant a
+    //Logistic run could not read back the file it had just written.
+    tmp_par = changeSpace(tmp_par, PROB_SPACE );
 
     std::string mystr((std::istreambuf_iterator<char>(fin)),
                  std::istreambuf_iterator<char>());
@@ -534,7 +539,7 @@ ExprPar ParFactory::load_1_6a(istream& fin){
 	throw runtime_error("Called deprecated ParFactory::load_1_6a");
 
     ExprPar tmp_par = create_expr_par();
-    tmp_par = changeSpace(tmp_par, expr_model.modelOption == LOGISTIC ? ENERGY_SPACE : PROB_SPACE );//TODO: get rid of this so that logistic models are stored in the same space with the other models.
+    tmp_par = changeSpace(tmp_par, PROB_SPACE );
 
     vector< string > motifNames;
 
@@ -692,7 +697,7 @@ ExprPar ParFactory::load_old(istream& fin){
 	throw runtime_error("Called deprecated ParFactory::load_old");
 
   ExprPar tmp_par = create_expr_par();
-  tmp_par = changeSpace(tmp_par, expr_model.modelOption == LOGISTIC ? ENERGY_SPACE : PROB_SPACE );//TODO: get rid of this so that logistic models are stored in the same space with the other models.
+  tmp_par = changeSpace(tmp_par, PROB_SPACE );
 
 
   /*

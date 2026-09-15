@@ -36,10 +36,13 @@ ModelType getModelOption( const string& modelOptionStr )
     if ( toupperStr( modelOptionStr ) == "QUENCHING" ) return QUENCHING;
     if ( toupperStr( modelOptionStr ) == "CHRMOD_UNLIMITED" ) return CHRMOD_UNLIMITED;
     if ( toupperStr( modelOptionStr ) == "CHRMOD_LIMITED" ) return CHRMOD_LIMITED;
-    if ( toupperStr( modelOptionStr ) == "RATES" ) return RATES;
     if ( toupperStr( modelOptionStr ) == "MARKOV" ) return MARKOV;
+    if ( toupperStr( modelOptionStr ) == "RATES" ){
+        cerr << "The Rates model is not implemented in this version." << endl;
+        exit(1);
+    }
 
-    cerr << "modelOptionStr is not a valid model option" << endl;
+    cerr << "'" << modelOptionStr << "' is not a valid model option (Logistic, Direct, Quenching, ChrMod_Unlimited, ChrMod_Limited, Markov)." << endl;
     exit(1);
 }
 
@@ -87,8 +90,7 @@ ExprFunc* ExprModel::createNewExprFunc( const ExprPar& par, const SiteVec& sites
         return_exprfunc = new Markov_ExprFunc(this, parToPass, sites_,seq_length,seq_num);
         break;
     default :
-        cerr << "Somehow, an invalid model argument was passed. " << endl;
-        assert(false);//Should never reach here.
+        throw std::invalid_argument("ExprModel::createNewExprFunc: no ExprFunc implementation for model option " + getModelOptionStr(this->modelOption));
   }
 
   return return_exprfunc;
@@ -128,7 +130,7 @@ void CoopInfo::read_coop_file(string filename, map<string, int> factorIdxMap){
 		//fin.exceptions ( std::ifstream::failbit);// | std::ifstream::badbit );
 		fin.open( filename.c_str(), std::ifstream::in );
 
-        std:string line;
+        std::string line;
         std::istringstream line_ss;
         vector<string> tokens;
         #define LOCAL_TOKENIZE(M_TOK_VECT,M_LINE_STR,M_SS) M_TOK_VECT.clear();\

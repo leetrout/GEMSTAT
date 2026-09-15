@@ -12,6 +12,32 @@
 
 double nlopt_obj_func( const vector<double> &x, vector<double> &grad, void* f_data);
 
+/**
+ * Run an NLopt optimizer and make sure the caller gets a consistent result.
+ *
+ * NLopt reports some stopping conditions as C++ exceptions.  roundoff_limited
+ * means it could not make further progress because of floating point
+ * precision; the point reached is still useful, so we keep it and only note
+ * the condition.  Any other exception is printed with its reason instead of
+ * being discarded.  In every case free_pars is whatever NLopt left in it and
+ * obj_result is the objective evaluated at that point, so a stale value from a
+ * previous stage is never returned.
+ */
+static void run_nlopt( nlopt::opt& optimizer, vector<double>& free_pars, double& obj_result, const char* stage, ExprPredictor* predictor )
+{
+    try{
+        optimizer.optimize( free_pars, obj_result );
+        obj_result = optimizer.last_optimum_value();
+        return;
+    }catch( const nlopt::roundoff_limited& ){
+        cerr << stage << ": NLopt stopped because roundoff errors limited further progress; keeping the point reached." << endl;
+    }catch( const std::exception& e ){
+        cerr << stage << ": NLopt stopped abnormally: " << e.what() << endl;
+    }
+    vector<double> no_grad;
+    obj_result = nlopt_obj_func( free_pars, no_grad, predictor );
+}
+
 ExprPredictor::ExprPredictor( const vector <Sequence>& _seqs, const vector< SiteVec >& _seqSites, const vector< int >& _seqLengths, TrainingDataset* _training_data, const vector< Motif >& _motifs, const ExprModel& _expr_model,
 		const vector < bool >& _indicator_bool, const vector <string>& _motifNames) : TrainingAware(), seqs(_seqs), seqSites( _seqSites ), seqLengths( _seqLengths ), training_data( _training_data ),
 	expr_model( _expr_model),
@@ -400,8 +426,7 @@ int ExprPredictor::simplex_minimize( ExprPar& par_result, double& obj_result )
       optimizer.set_upper_bounds(free_mins);
     }
 
-    nlopt::result result = optimizer.optimize(free_pars, obj_result);
-    obj_result = optimizer.last_optimum_value();
+    run_nlopt( optimizer, free_pars, obj_result, "simplex", this );
     //Done Minimizing
 
     param_factory->joinParams(free_pars, fix_pars, pars, indicator_bool);
@@ -439,16 +464,16 @@ int ExprPredictor::gradient_minimize( ExprPar& par_result, double& obj_result )
     //Set the stopping criterion
     double ftol;
     switch(objOption){
-      SSE:
+      case SSE:
         ftol = min_delta_f_SSE;
         break;
-      CORR:
+      case CORR:
         ftol = min_delta_f_Corr;
         break;
-      CROSS_CORR:
+      case CROSS_CORR:
         ftol = min_delta_f_CrossCorr;
         break;
-      PGP:
+      case PGP:
         ftol = min_delta_f_PGP;
         break;
       default:
@@ -472,12 +497,7 @@ int ExprPredictor::gradient_minimize( ExprPar& par_result, double& obj_result )
     //TODO: enforce nGradientIters
 	if(max_gradient_iterations > -1){ optimizer.set_maxeval(max_gradient_iterations); }
 
-    try{
-      nlopt::result result = optimizer.optimize(free_pars, obj_result);
-      obj_result = optimizer.last_optimum_value();
-    }catch(std::runtime_error){
-      cerr << "There was an exception in the gradient descent!" << endl;
-    }
+    run_nlopt( optimizer, free_pars, obj_result, "gradient descent", this );
 
     //Done Minimizing
     //pars now contains the optimal parameters
@@ -487,7 +507,6 @@ int ExprPredictor::gradient_minimize( ExprPar& par_result, double& obj_result )
     tmp_par_model = param_factory->create_expr_par(pars, ENERGY_SPACE);
 
     par_result = param_factory->changeSpace(tmp_par_model, PROB_SPACE);
-    cout << "DEBUG" << endl;
     return 0;
 }
 

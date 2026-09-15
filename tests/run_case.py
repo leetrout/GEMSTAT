@@ -116,10 +116,14 @@ def run_case(case_dir, binary, root_dir, data_dir, testdata_dir, workdir, update
         except subprocess.TimeoutExpired:
             return ["%s: timed out after %ss" % (name, spec.get("timeout", 600))]
 
+        # The usage message echoes argv[0]; keep the goldens independent of
+        # where the binary was built.
+        stdout = proc.stdout.replace(argv[0], "seq2expr")
+        stderr = proc.stderr.replace(argv[0], "seq2expr")
         with open(os.path.join(workdir, "stdout.txt"), "w") as fh:
-            fh.write(proc.stdout)
+            fh.write(stdout)
         with open(os.path.join(workdir, "stderr.txt"), "w") as fh:
-            fh.write(proc.stderr)
+            fh.write(stderr)
 
         want_rc = spec.get("exit_code", 0)
         if proc.returncode != want_rc:
@@ -139,7 +143,7 @@ def run_case(case_dir, binary, root_dir, data_dir, testdata_dir, workdir, update
         for stream, key in (("stdout", "stdout_match"), ("stderr", "stderr_match")):
             pats = spec.get(key)
             if pats:
-                text = proc.stdout if stream == "stdout" else proc.stderr
+                text = stdout if stream == "stdout" else stderr
                 checks.append((stream + ".txt", filter_lines(text, pats),
                                DEFAULT_RTOL, DEFAULT_ATOL))
 

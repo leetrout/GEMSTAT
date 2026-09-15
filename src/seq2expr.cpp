@@ -236,7 +236,7 @@ int main( int argc, char* argv[] )
     try{
         rval = readMotifs( motifFile, background, motifs, motifNames );
         ASSERT_MESSAGE( rval != RET_ERROR , "Could not read the motifs.");
-    }catch( std::runtime_error e){
+    }catch( const std::runtime_error& e){
         cerr << "Unable to read the PWM file because of error: " << e.what() << endl;
         exit(1);
     }
@@ -346,6 +346,9 @@ int main( int argc, char* argv[] )
 		cerr << "Loading initial parameters...";
         try{
           par_init = param_factory->load( parFile );
+          //The loader returns Logistic-model parameters in ENERGY_SPACE. Everything
+          //below (in particular reading annot_thresh out of par_init) expects PROB_SPACE.
+          par_init = param_factory->changeSpace( par_init, PROB_SPACE );
           read_par_init_file = true;
 	  }catch (exception& e){
             cerr << "Cannot read parameters from " << parFile << endl;

@@ -9,6 +9,15 @@ configure_file(config.h.in config.h)
 find_package(GSL REQUIRED)
 find_package(NLOPT REQUIRED)
 
+# Warnings for our own code (nlopt was added above and keeps its own flags).
+# The two -Werror= classes have each hidden a real bug in this code base:
+# a switch written with plain labels instead of case labels, and a stray
+# "std:" label.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-sign-compare
+                        -Werror=unused-label -Werror=return-type)
+endif()
+
 
 
 #
