@@ -1,0 +1,1 @@
+{"tfs":{"foo":{"annot_thresh":0.5567,"maxbind":7,"alpha_a":3.98347,"alpha_r":0.00180013}},"inter":{},"qbtm":[0.0121805],"enh":[{"pi":1e-11,"beta":1.6941}]}

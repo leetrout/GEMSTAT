@@ -1,0 +1,44 @@
+{
+  "args": [
+    "-s",
+    "@DATA@/seqs.fa",
+    "-e",
+    "@DATA@/expr.tab",
+    "-m",
+    "@DATA@/factors.wtmx",
+    "-f",
+    "@DATA@/factor_expr.tab",
+    "-i",
+    "@DATA@/factor_info.txt",
+    "-c",
+    "@DATA@/coop.txt",
+    "-o",
+    "Direct",
+    "-int",
+    "Gaussian",
+    "-sigma",
+    "50",
+    "-p",
+    "@TESTDATA@/fitted_direct.par",
+    "-na",
+    "0",
+    "--seed",
+    "1",
+    "-fo",
+    "out.txt",
+    "-po",
+    "par.txt"
+  ],
+  "compare": {
+    "out.txt": {},
+    "par.txt": {}
+  },
+  "stdout_match": [
+    "^Performance",
+    "^Objective function value"
+  ],
+  "labels": [
+    "fast",
+    "option"
+  ]
+}

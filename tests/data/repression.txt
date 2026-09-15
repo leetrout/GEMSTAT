@@ -1,0 +1,4 @@
+gt	bcd
+kni	bcd
+Kr	bcd
+Kr	cad

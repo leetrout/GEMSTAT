@@ -1,0 +1,36 @@
+{
+  "args": [
+    "-s",
+    "@TESTDATA@/toy/seqs.fa",
+    "-e",
+    "@TESTDATA@/toy/expr.tab",
+    "-m",
+    "@TESTDATA@/toy/factors.wtmx",
+    "-f",
+    "@TESTDATA@/toy/factor_expr.tab",
+    "-et",
+    "0.6",
+    "-na",
+    "10",
+    "-o",
+    "Direct",
+    "--seed",
+    "1",
+    "-fo",
+    "out.txt",
+    "-po",
+    "par.txt"
+  ],
+  "compare": {
+    "out.txt": {},
+    "par.txt": {}
+  },
+  "stdout_match": [
+    "^Performance",
+    "^Objective function value"
+  ],
+  "labels": [
+    "fast",
+    "ported"
+  ]
+}

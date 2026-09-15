@@ -1,0 +1,40 @@
+{
+  "args": [
+    "-s",
+    "@TESTDATA@/small/seqs.fa",
+    "-e",
+    "@TESTDATA@/small/expr.tab",
+    "-m",
+    "@TESTDATA@/small/factors.wtmx",
+    "-f",
+    "@TESTDATA@/small/factor_expr.tab",
+    "-i",
+    "@TESTDATA@/small/factor_info.txt",
+    "-c",
+    "@TESTDATA@/small/coop.txt",
+    "-o",
+    "Direct",
+    "-oo",
+    "SSE",
+    "-na",
+    "1",
+    "--seed",
+    "7",
+    "-fo",
+    "out.txt",
+    "-po",
+    "par.txt"
+  ],
+  "compare": {
+    "out.txt": {},
+    "par.txt": {}
+  },
+  "stdout_match": [
+    "^Performance",
+    "^Objective function value"
+  ],
+  "labels": [
+    "training"
+  ],
+  "timeout": 900
+}

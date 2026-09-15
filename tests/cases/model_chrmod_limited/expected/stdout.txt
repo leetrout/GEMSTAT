@@ -1,0 +1,3 @@
+Objective function value: 0.37055844
+Objective function value: 0.37055844
+Performance = 0.37056

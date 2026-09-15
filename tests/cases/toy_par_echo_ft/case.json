@@ -1,0 +1,33 @@
+{
+  "args": [
+    "-s",
+    "@TESTDATA@/toy/seqs.fa",
+    "-e",
+    "@TESTDATA@/toy/expr.tab",
+    "-m",
+    "@TESTDATA@/toy/factors.wtmx",
+    "-f",
+    "@TESTDATA@/toy/factor_expr.tab",
+    "-p",
+    "@TESTDATA@/toy/start.par",
+    "-et",
+    "0.757575",
+    "-ft",
+    "@TESTDATA@/toy/fact_tr.txt",
+    "-na",
+    "0",
+    "-o",
+    "Direct",
+    "-fo",
+    "out.txt",
+    "-po",
+    "par.txt"
+  ],
+  "compare": {
+    "par.txt": {}
+  },
+  "labels": [
+    "fast",
+    "ported"
+  ]
+}
