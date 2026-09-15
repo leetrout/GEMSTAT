@@ -76,6 +76,26 @@ class ExprPredictor : public TrainingAware
         int max_gradient_iterations;              // maximum number of iterations for Gradient optimizer (default = 50)
         vector < bool > indicator_bool;
         vector <string> motifNames;
+
+        // how the gradient for the gradient optimizer is obtained
+        enum GradientMethod { GRADIENT_FD, GRADIENT_AD };
+        GradientMethod gradient_method;           // default GRADIENT_AD
+        ParamSlots slots;                         // layout of the flat parameter vector (for the AD gradient)
+
+        /*
+         * Gradient of the objective with respect to the flat PROB_SPACE parameter
+         * vector of par (which must be in PROB_SPACE), by reverse-mode automatic
+         * differentiation through every sequence's partition functions.  Costs
+         * a few objective evaluations however many parameters there are.
+         */
+        void gradient_prob( const ExprPar& par, vector< double >& grad ) const;
+
+        /*
+         * Compare the AD gradient with a central-difference gradient at the
+         * current parameters (par_model), print both, and return whether they
+         * agree (relative difference below tol, or both below tol in magnitude).
+         */
+        bool checkGradient( const ExprPar& par_init, ostream& os, double tol = 1.0e-4 );
         vector < double > fix_pars;
         vector < double > free_pars;
         vector < Sequence > seqs;
@@ -132,5 +152,7 @@ class ExprPredictor : public TrainingAware
 double gsl_obj_f( const gsl_vector* v, void* params );
 void gsl_obj_df( const gsl_vector* v, void* params, gsl_vector* grad );
 void gsl_obj_df( const gsl_vector* v, void* params, gsl_vector* grad, double f_val ); // f_val = gsl_obj_f(v, params), already known
+void gsl_obj_df_fd( const gsl_vector* v, void* params, gsl_vector* grad, double f_val ); // forward differences
+void gsl_obj_df_ad( const gsl_vector* v, void* params, gsl_vector* grad );               // reverse-mode automatic differentiation
 void gsl_obj_fdf( const gsl_vector* v, void* params, double* result, gsl_vector* grad );
 #endif

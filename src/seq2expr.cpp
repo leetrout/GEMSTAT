@@ -83,6 +83,8 @@ int main( int argc, char* argv[] )
 
     int cmdline_n_alternations = 5;
     int cmdline_n_random_starts = 0;
+    string cmdline_gradient = "ad";
+    bool cmdline_check_gradient = false;
     int cmdline_max_simplex_iterations = 400;
     int cmdline_max_gradient_iterations = 50;
     for ( int i = 1; i < argc; i++ )
@@ -144,6 +146,10 @@ int main( int argc, char* argv[] )
             factor_thr_file = argv[ ++i ];
 	else if ( !strcmp( "--seed", argv[ i ]))
 	    initialSeed = atol( argv[++i] );
+	else if ( !strcmp( "--gradient", argv[ i ]))
+	    cmdline_gradient = argv[++i];
+	else if ( !strcmp( "--check_gradient", argv[ i ]))
+	    cmdline_check_gradient = true;
 	else if ( !strcmp( "--random_starts", argv[ i ]))
 	    cmdline_n_random_starts = atoi( argv[++i] );
 	else if ( !strcmp( "--threads", argv[ i ]))
@@ -177,7 +183,7 @@ int main( int argc, char* argv[] )
 
     if ( seqFile.empty() || exprFile.empty() || motifFile.empty() || factorExprFile.empty() || outFile.empty() || ( ( cmdline_modelOption == QUENCHING || cmdline_modelOption == CHRMOD_UNLIMITED || cmdline_modelOption == CHRMOD_LIMITED ) &&  factorInfoFile.empty() ) || ( cmdline_modelOption == QUENCHING && repressionFile.empty() ) )
     {
-        cerr << "Usage: " << argv[ 0 ] << " -s seqFile -e exprFile -m motifFile -f factorExprFile -fo outFile [-a annFile -o modelOption -c coopFile -i factorInfoFile -r repressionFile -oo objOption -mc maxContact -p parFile -rt repressionDistThr -na nAlternations -ct coopDistThr -sigma factorIntSigma --seed RNG_SEED --random_starts N --threads N]" << endl;
+        cerr << "Usage: " << argv[ 0 ] << " -s seqFile -e exprFile -m motifFile -f factorExprFile -fo outFile [-a annFile -o modelOption -c coopFile -i factorInfoFile -r repressionFile -oo objOption -mc maxContact -p parFile -rt repressionDistThr -na nAlternations -ct coopDistThr -sigma factorIntSigma --seed RNG_SEED --random_starts N --threads N --gradient ad|fd --check_gradient]" << endl;
         cerr << "modelOption: Logistic, Direct, Quenching, ChrMod_Unlimited, ChrMod_Limited" << endl;
         exit( 1 );
     }
@@ -623,6 +629,9 @@ int main( int argc, char* argv[] )
     predictor->min_delta_f_SSE = 1.0E-10;
     predictor->min_delta_f_Corr = 1.0E-10;
     predictor->min_delta_f_CrossCorr = 1.0E-10;
+    if ( cmdline_gradient == "ad" ) predictor->gradient_method = ExprPredictor::GRADIENT_AD;
+    else if ( cmdline_gradient == "fd" ) predictor->gradient_method = ExprPredictor::GRADIENT_FD;
+    else { cerr << "--gradient must be 'ad' (automatic differentiation) or 'fd' (finite differences), got '" << cmdline_gradient << "'" << endl; exit(1); }
     predictor->max_simplex_iterations = cmdline_max_simplex_iterations;
     predictor->max_gradient_iterations = cmdline_max_gradient_iterations;
 
@@ -721,6 +730,13 @@ int main( int argc, char* argv[] )
     const gsl_rng_type * T = gsl_rng_default;     // create rng type
     rng = gsl_rng_alloc( T );
     gsl_rng_set( rng, initialSeed );                // set the seed equal to simulTime(0)
+
+    if ( cmdline_check_gradient )
+    {
+        bool ok = predictor->checkGradient( par_init, cout );
+        gsl_rng_free( rng );
+        return ok ? 0 : 1;
+    }
 
     // model fitting
 

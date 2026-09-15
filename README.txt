@@ -52,6 +52,10 @@ Explanation of parameters:
 
 -rt <repressionDistThr>: the distance threshold of short range repression. Default = 150 bp. 
 
+--gradient <ad|fd>: how the gradient for the gradient-based optimizer (L-BFGS) is computed. "ad" (default) is reverse-mode automatic differentiation through the partition functions: exact, and its cost does not grow with the number of parameters. "fd" is the forward-difference approximation of earlier versions (one extra objective evaluation per free parameter), kept for comparison.
+
+--check_gradient: instead of training, compare the automatic-differentiation gradient with a central-difference gradient at the initial parameters, print both, and exit with status 0 if they agree (relative difference below 1e-4) or 1 if not.
+
 --random_starts <N>: after training from the initial parameters, train again from N random starting points (drawn with --seed) and keep the best result. Default 0. This happens inside one process: the inputs are read and annotated once.
 
 --seed <RNG_SEED>: seed of the random number generator (used for random restarts). Runs with the same inputs and seed are reproducible. Default: the current time.

@@ -87,3 +87,66 @@ double HalfDirectional_FactorIntFunc::compFactorInt( double normalInt, double di
 	if( ( enforce_a && (a_strand != expected_a_strand) ) || (enforce_b && (b_strand != expected_b_strand)) || (dist > distThr) ){ return 1.0; }
 	return normalInt;
 }
+
+
+/*
+ * Affine forms of the interaction functions above (see FactorIntFunc.h).
+ * Each mirrors the corresponding compFactorInt() branch for branch.
+ */
+void FactorIntFuncBinary::affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const
+{
+    assert( dist >= 0 );
+    bool orientation = ( a_strand == b_strand );
+    if ( dist < distThr ) { scale = 1.0; offset = 0.0; } else { scale = 0.0; offset = 1.0; }
+    clamp_to_one = false;
+    post = orientation ? 1.0 : orientationEffect;
+}
+
+void FactorIntFuncGaussian::affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const
+{
+    assert( dist >= 0 );
+    if ( dist < distThr ) { scale = exp( - ( dist * dist ) / ( 2.0 * sigma * sigma ) ); offset = 0.0; }
+    else { scale = 0.0; offset = 1.0; }
+    clamp_to_one = true;
+    post = 1.0;
+}
+
+void FactorIntFuncGeometric::affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const
+{
+    assert( dist >= 0 );
+    bool orientation = ( a_strand == b_strand );
+    scale = dist <= distThr ? 1.0 : pow( spacingEffect, dist - distThr );
+    offset = 0.0;
+    clamp_to_one = true;
+    post = orientation ? 1.0 : orientationEffect;
+}
+
+void FactorIntFuncHelical::affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const
+{
+    assert( dist >= 0 );
+    clamp_to_one = false;
+    post = 1.0;
+    if ( dist >= distThr || dist <= 5.0 ) { scale = 0.0; offset = 1.0; return; }
+    double coeff = M_PI*32.7/180.0;
+    double c = 0.5*(cos(coeff * dist) + 1.0);
+    scale = c;
+    offset = 1.0 - c;
+}
+
+void Dimer_FactorIntFunc::affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const
+{
+    assert( dist >= 0 );
+    clamp_to_one = false;
+    post = 1.0;
+    if( (a_strand != expected_a_strand) || (b_strand != expected_b_strand) || (dist > distThr) ){ scale = 0.0; offset = 1.0; return; }
+    scale = 1.0; offset = 0.0;
+}
+
+void HalfDirectional_FactorIntFunc::affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const
+{
+    assert( dist >= 0 );
+    clamp_to_one = false;
+    post = 1.0;
+    if( ( enforce_a && (a_strand != expected_a_strand) ) || (enforce_b && (b_strand != expected_b_strand)) || (dist > distThr) ){ scale = 0.0; offset = 1.0; return; }
+    scale = 1.0; offset = 0.0;
+}

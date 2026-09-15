@@ -3,8 +3,84 @@
 #include "ExprPredictor.h"
 #include "ExprPar.h"
 
+#include <map>
+#include <sstream>
+#include <stdexcept>
+
 //#define DEBUG
-ExprFunc::ExprFunc( const ExprModel* _model, const ExprPar& _par , const SiteVec& sites_, const int seq_len, const int seq_num): expr_model(_model), par(_par), motifs( _model->motifs ), actIndicators( _model->actIndicators ), maxContact( _model->maxContact ), repIndicators( _model->repIndicators ), repressionMat( _model->repressionMat ), repressionDistThr( _model->repressionDistThr ), factorIntMat(_model->motifs.size(),_model->motifs.size(),1.0)
+
+/*****************************************************
+ * ParamSlots
+ ******************************************************/
+
+void ParamSlots::flatten_paths( const gsparams::DictList& d, const std::string& prefix, vector< std::string >& out )
+{
+    if ( d.my_type == gsparams::undecided ) return;
+    if ( d.my_type == gsparams::primitive ) { out.push_back( prefix ); return; }
+    int n = d.list_storage.size();
+    for ( int i = 0; i < n; i++ )
+    {
+        std::string key;
+        if ( d.my_type == gsparams::dict ) key = d.map_key_storage.at(i);
+        else { std::ostringstream ss; ss << i; key = ss.str(); }
+        flatten_paths( d.list_storage.at(i), prefix.empty() ? key : prefix + "/" + key, out );
+    }
+}
+
+ParamSlots ParamSlots::build( const ExprPar& par, const vector< string >& motifNames )
+{
+    vector< std::string > paths;
+    flatten_paths( par.my_pars, "", paths );
+    std::map< std::string, int > index;
+    for ( size_t i = 0; i < paths.size(); i++ ) index[ paths[i] ] = (int)i;
+    struct Find {
+        const std::map< std::string, int >& index;
+        int operator()( const std::string& p ) const { std::map< std::string, int >::const_iterator it = index.find( p ); return it == index.end() ? -1 : it->second; }
+    } find = { index };
+
+    ParamSlots s;
+    s.n_pars = paths.size();
+    int nF = motifNames.size();
+    s.maxbind.resize( nF ); s.alpha_a.resize( nF ); s.alpha_r.resize( nF );
+    for ( int f = 0; f < nF; f++ )
+    {
+        s.maxbind[f] = find( "tfs/" + motifNames[f] + "/maxbind" );
+        s.alpha_a[f] = find( "tfs/" + motifNames[f] + "/alpha_a" );
+        s.alpha_r[f] = find( "tfs/" + motifNames[f] + "/alpha_r" );
+    }
+    s.inter.assign( nF, vector< int >( nF, -1 ) );
+    for ( int a = 0; a < nF; a++ )
+    {
+        for ( int b = a; b < nF; b++ )
+        {
+            int slot = find( "inter/" + motifNames[a] + ":" + motifNames[b] );
+            if ( slot < 0 ) slot = find( "inter/" + motifNames[b] + ":" + motifNames[a] );
+            s.inter[a][b] = s.inter[b][a] = slot;
+        }
+    }
+    for ( int k = 0; ; k++ )
+    {
+        std::ostringstream ss; ss << "qbtm/" << k;
+        int slot = find( ss.str() );
+        if ( slot < 0 ) break;
+        s.qbtm.push_back( slot );
+    }
+    for ( int k = 0; ; k++ )
+    {
+        std::ostringstream ss; ss << "enh/" << k;
+        int beta = find( ss.str() + "/beta" );
+        if ( beta < 0 ) break;
+        s.beta.push_back( beta );
+        s.pi.push_back( find( ss.str() + "/pi" ) );
+    }
+    return s;
+}
+
+/*****************************************************
+ * ExprFunc
+ ******************************************************/
+
+ExprFunc::ExprFunc( const ExprModel* _model, const ExprPar& _par , const SiteVec& sites_, const int seq_len, const int seq_num): expr_model(_model), motifs( _model->motifs ), actIndicators( _model->actIndicators ), maxContact( _model->maxContact ), repIndicators( _model->repIndicators ), repressionMat( _model->repressionMat ), repressionDistThr( _model->repressionDistThr ), par(_par), factorIntMat(_model->motifs.size(),_model->motifs.size(),1.0)
 {
     //par = _par;//NOTE: made this const, and that solved a memory leak.
 
@@ -63,6 +139,12 @@ ExprFunc::ExprFunc( const ExprModel* _model, const ExprPar& _par , const SiteVec
     this->setupSitesAndBoundaries(sites_,seq_length, seq_num);
     this->buildLeftNeighbours( true, left_nbrs );
 
+    // the values the recurrences work on for an ordinary prediction
+    plain.maxBindingWts.assign( maxBindingWts.begin(), maxBindingWts.end() );
+    plain.txpEffects.assign( txpEffects.begin(), txpEffects.end() );
+    plain.repEffects.assign( repEffects.begin(), repEffects.end() );
+    plain.basal = par.getPromoterData( seq_number ).basal_trans;
+    this->fillPlainWeights();
 }
 
 void ExprFunc::buildLeftNeighbours( bool within_boundaries, vector< vector< SiteInteraction > >& out ) const
@@ -85,6 +167,104 @@ void ExprFunc::buildLeftNeighbours( bool within_boundaries, vector< vector< Site
             out[i].push_back( si );
         }
     }
+}
+
+void ExprFunc::fillPlainWeights()
+{
+    plain.w_ij.assign( left_nbrs.size(), vector< gemstat_dp_t >() );
+    plain.w_ji.assign( left_nbrs.size(), vector< gemstat_dp_t >() );
+    for ( size_t i = 0; i < left_nbrs.size(); i++ )
+    {
+        plain.w_ij[i].resize( left_nbrs[i].size() );
+        plain.w_ji[i].resize( left_nbrs[i].size() );
+        for ( size_t k = 0; k < left_nbrs[i].size(); k++ )
+        {
+            plain.w_ij[i][k] = left_nbrs[i][k].w_ij;
+            plain.w_ji[i][k] = left_nbrs[i][k].w_ji;
+        }
+    }
+    plain.all_w_ji.assign( all_left_nbrs.size(), vector< gemstat_dp_t >() );
+    for ( size_t i = 0; i < all_left_nbrs.size(); i++ )
+    {
+        plain.all_w_ji[i].resize( all_left_nbrs[i].size() );
+        for ( size_t k = 0; k < all_left_nbrs[i].size(); k++ ) plain.all_w_ji[i][k] = all_left_nbrs[i][k].w_ji;
+    }
+    plain.right_w_ij.assign( right_nbrs.size(), vector< gemstat_dp_t >() );
+    for ( size_t i = 0; i < right_nbrs.size(); i++ )
+    {
+        plain.right_w_ij[i].resize( right_nbrs[i].size() );
+        for ( size_t k = 0; k < right_nbrs[i].size(); k++ ) plain.right_w_ij[i][k] = right_nbrs[i][k].w_ij;
+    }
+}
+
+ThermoVals< gemstat_ad_t > ExprFunc::makeVals( const vector< gemstat_ad_t >& flat, const ParamSlots& slots ) const
+{
+    typedef gemstat_ad_t V;
+    // The Logistic model works on ENERGY_SPACE parameters (see
+    // ExprModel::createNewExprFunc); the flat vector is PROB_SPACE.
+    const bool energy = ( expr_model->modelOption == LOGISTIC );
+    struct Get {
+        const vector< V >& flat; bool energy;
+        V operator()( int slot, double dflt ) const
+        {
+            if ( slot < 0 ) return V( (gemstat_dp_t)dflt );
+            return energy ? log( flat[slot] ) : flat[slot];
+        }
+    } get = { flat, energy };
+
+    ThermoVals< V > v;
+    int nF = motifs.size();
+    v.maxBindingWts.resize( nF ); v.txpEffects.resize( nF ); v.repEffects.resize( nF );
+    for ( int f = 0; f < nF; f++ )
+    {
+        v.maxBindingWts[f] = get( slots.maxbind[f], 1.0 );
+        v.txpEffects[f] = get( slots.alpha_a[f], 1.0 );
+        v.repEffects[f] = get( slots.alpha_r[f], 1.0 );
+    }
+
+    v.w_ij.assign( left_nbrs.size(), vector< V >() );
+    v.w_ji.assign( left_nbrs.size(), vector< V >() );
+    for ( size_t i = 0; i < left_nbrs.size(); i++ )
+    {
+        v.w_ij[i].resize( left_nbrs[i].size() );
+        v.w_ji[i].resize( left_nbrs[i].size() );
+        for ( size_t k = 0; k < left_nbrs[i].size(); k++ )
+        {
+            int j = left_nbrs[i][k].j;
+            V normalInt = get( slots.inter[ sites[i].factorIdx ][ sites[j].factorIdx ], 1.0 );
+            v.w_ij[i][k] = factorIntAffine( sites[i], sites[j], normalInt );
+            v.w_ji[i][k] = factorIntAffine( sites[j], sites[i], normalInt );
+        }
+    }
+    v.all_w_ji.assign( all_left_nbrs.size(), vector< V >() );
+    for ( size_t i = 0; i < all_left_nbrs.size(); i++ )
+    {
+        v.all_w_ji[i].resize( all_left_nbrs[i].size() );
+        for ( size_t k = 0; k < all_left_nbrs[i].size(); k++ )
+        {
+            int j = all_left_nbrs[i][k].j;
+            V normalInt = get( slots.inter[ sites[i].factorIdx ][ sites[j].factorIdx ], 1.0 );
+            v.all_w_ji[i][k] = factorIntAffine( sites[j], sites[i], normalInt );
+        }
+    }
+    v.right_w_ij.assign( right_nbrs.size(), vector< V >() );
+    for ( size_t i = 0; i < right_nbrs.size(); i++ )
+    {
+        v.right_w_ij[i].resize( right_nbrs[i].size() );
+        for ( size_t k = 0; k < right_nbrs[i].size(); k++ )
+        {
+            int j = right_nbrs[i][k].j;
+            V normalInt = get( slots.inter[ sites[i].factorIdx ][ sites[j].factorIdx ], 1.0 );
+            v.right_w_ij[i][k] = factorIntAffine( sites[i], sites[j], normalInt );
+        }
+    }
+
+    // basal transcription slot, as ExprPar::getPromoterData() picks it
+    int use_enhancerID = expr_model->shared_scaling ? 0 : seq_number;
+    int use_basal = expr_model->one_qbtm_per_crm ? use_enhancerID : 0;
+    if ( use_basal >= (int)slots.qbtm.size() ) throw std::logic_error( "ExprFunc::makeVals: no qbtm slot for this sequence" );
+    v.basal = get( slots.qbtm[ use_basal ], 1.0 );
+    return v;
 }
 
 void ExprFunc::setupSitesAndBoundaries(const SiteVec& _sites, int length, int seq_num){
@@ -128,6 +308,7 @@ void ExprFunc::setupSitesAndBoundaries(const SiteVec& _sites, int length, int se
 }
 
 void ExprFunc::setupBindingWeights(const vector< double >& factorConcs){
+  vector< gemstat_dp_t >& bindingWts = plain.bindingWts;
   bindingWts.resize(sites.size());
   bindingWts[0] = 1.0;  //for first pseudosite
   bindingWts[bindingWts.size()-1] = 1.0; //might or might not be a pseudosite, gets overwritten if not
@@ -135,14 +316,6 @@ void ExprFunc::setupBindingWeights(const vector< double >& factorConcs){
   for ( int i = 1; i <= n; i++ )
   {
       bindingWts[i] = maxBindingWts[ sites[i].factorIdx ] * factorConcs[sites[i].factorIdx] * sites[i].prior_probability * sites[i].wtRatio ;
-      /*
-      double samee = maxBindingWts[sites[i].factorIdx]*factorConcs[sites[i].factorIdx]*sites[i].prior_probability*sites[i].wtRatio;
-      if(samee != samee)
-      {
-          cout << "DEBUG: samee for " << i << "\t" << sites[i].factorIdx << "\t" <<  maxBindingWts[sites[i].factorIdx] <<"\t" << factorConcs[sites[i].factorIdx] <<"\t" << sites[i].prior_probability <<"\t" << sites[i].wtRatio << endl;
-          exit(1);
-      }
-      */
   }
 }
 
@@ -159,32 +332,22 @@ double ExprFunc::predictExpr(const Condition& in_condition){
 
 double ExprFunc::predictExpr( const vector< double >& factorConcs )
 {
-
     // compute the Boltzman weights of binding for all sites
     setupBindingWeights(factorConcs);
 
     // Thermodynamic models: Direct, Quenching, ChrMod_Unlimited and ChrMod_Limited
     // compute the partition functions
     gemstat_dp_t Z_off = compPartFuncOff();
-    //cout << "Z_off = " << Z_off << endl;
     gemstat_dp_t Z_on = compPartFuncOn();
-    //cout << "Z_on = " << Z_on << endl;
 
     // compute the expression (promoter occupancy)
-    gemstat_dp_t efficiency = Z_on / Z_off;
-    //cout << "efficiency = " << efficiency << endl;
-    //cout << "basalTxp = " << basalTxps[ seq_num ] << endl;
-
-    GEMSTAT_PROMOTER_DATA_T my_promoter = par.getPromoterData( this->seq_number );
-
-    gemstat_dp_t promoterOcc = efficiency * my_promoter.basal_trans / ( 1.0 + efficiency * my_promoter.basal_trans /** ( 1 + my_promoter.pi )*/ );
+    gemstat_dp_t promoterOcc = thermoOccupancy( Z_off, Z_on, plain.basal );
     #ifdef DEBUG
     if(promoterOcc < 0.0 || promoterOcc != promoterOcc){
 	cerr << "Ridiculous in Direct!" << endl;
-	cerr << "efficiency " << efficiency << endl;
 	cerr << "Z_on" << Z_on << endl;
 	cerr << "Z_off" << Z_off << endl;
-	cerr << "basal " << my_promoter.basal_trans << endl; //TODO: I think I just found the bug.
+	cerr << "basal " << plain.basal << endl;
 	cerr << "=====" << endl;
 	}
     #else
@@ -193,39 +356,36 @@ double ExprFunc::predictExpr( const vector< double >& factorConcs )
     return promoterOcc;
 }
 
-double Logistic_ExprFunc::predictExpr( const vector< double >& factorConcs ){
-
-  // compute the Boltzman weights of binding for all sites
-  setupBindingWeights(factorConcs);
-
-  GEMSTAT_PROMOTER_DATA_T my_promoter = par.getPromoterData( this->seq_number );
-
-  // total occupancy of each factor
-  vector< gemstat_dp_t > factorOcc( motifs.size(), 0 );
-  for ( int i = 1; i <= n_sites; i++ )
-  {
-      factorOcc[ sites[i].factorIdx ] += bindingWts[i] / ( 1.0 + bindingWts[i] );
-  }
-  gemstat_dp_t totalEffect = 0;
-  //         cout << "factor\toccupancy\ttxp_effect" << endl;
-  for ( int i = 0; i < motifs.size(); i++ )
-  {
-      gemstat_dp_t effect = txpEffects[i] * factorOcc[i];
-      totalEffect += effect;
-      //             cout << i << "\t" << factorOcc[i] << "\t" << effect << endl;
-
-      // length correction
-      //             totalEffect = totalEffect / (double)length;
-  }
-  //         return expRatio * logistic( log( my_promoter.basal_trans ) + totalEffect );
-  return logistic( my_promoter.basal_trans + totalEffect );
+gemstat_ad_t ExprFunc::predictExprAD( ThermoVals< gemstat_ad_t >& vals, const vector< double >& factorConcs ) const
+{
+    setupBindingWeightsT( vals, factorConcs );
+    gemstat_ad_t Z_off = compPartFuncOffAD( vals );
+    gemstat_ad_t Z_on = compPartFuncOnAD( vals );
+    return thermoOccupancy( Z_off, Z_on, vals.basal );
 }
+
+/*****************************************************
+ * Logistic
+ ******************************************************/
+
+double Logistic_ExprFunc::predictExpr( const vector< double >& factorConcs ){
+  setupBindingWeights(factorConcs);
+  return kernelLogistic( plain );
+}
+
+gemstat_ad_t Logistic_ExprFunc::predictExprAD( ThermoVals< gemstat_ad_t >& vals, const vector< double >& factorConcs ) const
+{
+    setupBindingWeightsT( vals, factorConcs );
+    return kernelLogistic( vals );
+}
+
+/*****************************************************
+ * Markov
+ ******************************************************/
 
 Markov_ExprFunc::Markov_ExprFunc( const ExprModel* _model, const ExprPar& _par , const SiteVec& sites_, const int seq_len, const int seq_num) : ExprFunc( _model, _par , sites_, seq_len, seq_num){
 
     //Additional setup for a Markov_ExprFunc
-    //void Markov_ExprFunc::setupSitesAndBoundaries(const SiteVec& _sites, int length, int seq_num){
-
     #ifdef DEBUG
     cerr << "running Markov_ExprFunc::setupSitesAndBoundaries(...)" << endl;
     #endif
@@ -262,495 +422,60 @@ Markov_ExprFunc::Markov_ExprFunc( const ExprModel* _model, const ExprPar& _par ,
             right_nbrs[i].push_back( si );
         }
     }
+    this->fillPlainWeights();
 }
 
 double Markov_ExprFunc::predictExpr( const vector< double >& factorConcs )
 {
-  int n = n_sites;
-  #ifdef DEBUG
-  cout << "SITES size : " << sites.size() << " : n_sites : " << n_sites << endl;
-  assert(sites.size() == n_sites+2);
-  #endif
-
-  /*
-  cerr << "BOUNDARIES " << n << endl;
-  cerr << boundaries << endl;
-  cerr << "rev bounds " << endl;
-  cerr << rev_bounds << endl;
-  */
-  setupBindingWeights(factorConcs);
-
-    #ifdef DEBUG
-    cerr << "Done setting bindingWts" << endl;
-    #endif
-    // initialization
-    vector< gemstat_dp_t > Z( n + 2 );
-    Z[0] = 1.0;
-    vector< gemstat_dp_t > Zt( n + 2 );
-    Zt[0] = 1.0;
-
-    vector< gemstat_dp_t > backward_Z(n+2,0.0);
-    backward_Z[backward_Z.size()-1] = 1.0;
-    vector< gemstat_dp_t > backward_Z_sum(n+1,0.0);
-    vector< gemstat_dp_t > backward_Zt(n+2,0.0);
-    backward_Zt[backward_Zt.size()-1] = 1.0;
-
-    // recurrence forward
-    for ( int i = 1; i <= n; i++ )
-    {
-        gemstat_dp_t sum = Zt[boundaries[i]];
-        const vector< SiteInteraction >& nbrs = left_nbrs[i];
-        for ( size_t k = 0; k < nbrs.size(); k++ )
-        {
-            sum += nbrs[k].w_ij * Z[ nbrs[k].j ];
-        }
-        Z[ i ] = bindingWts[ i ] * sum;
-        Zt[i] = Z[i] + Zt[i - 1];
-    }
-
-    // recurrence backward
-    for ( int i = n; i >= 1; i-- )
-    {
-        gemstat_dp_t sum = backward_Zt[rev_bounds[i]];
-        const vector< SiteInteraction >& nbrs = right_nbrs[i];
-        for ( size_t k = 0; k < nbrs.size(); k++ )
-        {
-            sum += nbrs[k].w_ij * backward_Z[ nbrs[k].j ];
-        }
-        backward_Z_sum[i] = sum;
-        backward_Z[ i ] =  sum*bindingWts[i];
-        backward_Zt[i] = backward_Z[i] + backward_Zt[i + 1] ;
-    }
-
-
-
-
-    #ifdef DEBUG
-    vector< gemstat_dp_t > final_Z(n_sites+2,0.0);
-    vector< gemstat_dp_t > final_Zt(n_sites+2,0.0);//not used, for debug only.
-    bool problem = false;
-    #endif
-
-    vector< double > bindprobs(n_sites+2,0.0);
-
-    for(int i = 1;i<=n_sites;i++){
-      //Notice the i+1, we are skipping the pseudosite.
-      gemstat_dp_t one_final_Z = Z[i] * backward_Z_sum[i];
-      #ifdef DEBUG
-      final_Z[i] = one_final_Z;
-      final_Zt[i] = Zt[i] * backward_Zt[i];
-      #endif
-      //bindprobs[i] = final_Z[i] / final_Zt[i];
-      bindprobs[i] = one_final_Z / backward_Zt[1];
-      #ifdef DEBUG
-      if( bindprobs[i] <= 0.0 || bindprobs[i] >= 1.0){
-        problem = true;
-      }
-      #else
-      assert(bindprobs[i] >= 0.0);
-      assert(bindprobs[i] <= 1.0);
-      #endif
-    }
-
-    #ifdef DEBUG
-    if(problem){
-    cout << endl;
-    cerr << "=====DEBUG=====" << endl;
-    cerr << "Forward_Zt " << endl << Zt << endl;
-    cerr << "====" << endl;
-    cerr << "Backward_Zt " << endl << backward_Zt << endl;
-    cerr << "====" << endl;
-    cerr << "final_Zt " << endl << final_Zt << endl;
-    cerr << "====" << endl;
-    cerr << "final_Z " << endl << final_Z << endl;
-    cerr << "====" << endl;
-    cerr << "=====END=======" << endl;
-    }
-    #endif
-    return this->expr_from_config(bindprobs);
+    setupBindingWeights(factorConcs);
+    return kernelMarkov( plain );
 }
 
-double Markov_ExprFunc::expr_from_config(const vector< double >& marginals){
-  double sum_total = 0.0;
-
-  GEMSTAT_PROMOTER_DATA_T my_promoter = par.getPromoterData( seq_number );
-
-  assert(n_sites + 2 == marginals.size());
-
-  for(int i = 1; i <= n_sites; i++){
-    //Iterating over the sites, not counting beginning or ending pseudosites
-
-    double log_effect = 0.0;
-
-    if( actIndicators[ sites[ i ].factorIdx ] )
-    {
-        log_effect = log(txpEffects[ sites[ i ].factorIdx ]);
-    }
-    if( repIndicators[ sites[ i ].factorIdx ] )
-    {
-        log_effect = log(repEffects[ sites[ i ].factorIdx ]);
-    }
-
-    sum_total += log_effect*marginals[i];
-  }
-
-  //TODO: do I need to make it negative?....
-  //TODO: check one_qbtm_per_crm only once, higher up.
-  double Z_on = exp(sum_total)*my_promoter.basal_trans;
-  return Z_on / (1.0 + Z_on);
-
-}
-
-//ModelType ExprFunc::modelOption = QUENCHING;
-
-gemstat_dp_t ExprFunc::compPartFuncOff() const
+gemstat_ad_t Markov_ExprFunc::predictExprAD( ThermoVals< gemstat_ad_t >& vals, const vector< double >& factorConcs ) const
 {
-    #ifdef DEBUG
-      //assert(modelOption != CHRMOD_UNLIMITED && modelOption != CHRMOD_LIMITED );
-    #endif
-
-    int n = n_sites;
-    // initialization
-    vector< gemstat_dp_t > Z( n + 1 );
-    Z[0] = 1.0;
-    vector< gemstat_dp_t > Zt( n + 1 );
-    Zt[0] = 1.0;
-
-    // recurrence
-    for ( int i = 1; i <= n; i++ )
-    {
-        gemstat_dp_t sum = Zt[boundaries[i]];
-        if( sum != sum )
-        {
-            cout << "DEBUG: sum nan" << "\t" << Zt[ boundaries[i] ] <<  endl;
-            exit(1);
-        }
-        //cout << "DEBUG: sum = " << n << endl;
-        const vector< SiteInteraction >& nbrs = left_nbrs[i];
-        for ( size_t k = 0; k < nbrs.size(); k++ )
-        {
-            int j = nbrs[k].j;
-            gemstat_dp_t old_sum = sum;
-            sum += nbrs[k].w_ij * Z[ j ];
-            if( sum != sum || isinf( sum ))
-            {
-                cout << "Old sum:\t" << old_sum << endl;
-                cout << "Factors:\t" << sites[ i ].factorIdx << "\t" << sites[ j ].factorIdx << endl;
-                cout << "compFactorInt:\t" << nbrs[k].w_ji << endl;
-                cout << "Z[j]:\t" << Z[ j ] << endl;
-                cout << i << "\t" << j << "\t" << factorIntMat( (sites[i]).factorIdx, (sites[j]).factorIdx ) << endl;
-                cout << "DEBUG: sum nan/inf\t"<< sum << endl;
-                exit(1);
-            }
-        }
-
-        Z[i] = bindingWts[ i ] * sum;
-        if( Z[i]!=Z[i] )
-        {
-            cout << "DEBUG: Z bindingWts[i]: " << sites[i].factorIdx << "\t" << bindingWts[ sites[i].factorIdx ] <<"\t" << sum << endl;
-            exit(1);
-        }
-        Zt[i] = Z[i] + Zt[i - 1];
-        //cout << "debug: Zt[i] = " << Zt[i] << endl;
-    }
-
-    // the partition function
-    // 	gemstat_dp_t Z_bind = 1;
-    // 	for ( int i = 0; i < sites.size(); i++ ) {
-    // 		Z_bind += Z[ i ];
-    // 	}
-    return Zt[n];
+    setupBindingWeightsT( vals, factorConcs );
+    return kernelMarkov( vals );
 }
 
+/*****************************************************
+ * Partition functions
+ ******************************************************/
 
-gemstat_dp_t ChrMod_ExprFunc::compPartFuncOff() const
-{
-    int n = n_sites;
-
-    // initialization
-    vector< gemstat_dp_t > Z0( n + 1 );
-    Z0[0] = 1.0;
-    vector< gemstat_dp_t > Z1( n + 1 );
-    Z1[0] = 1.0;
-    vector< gemstat_dp_t > Zt( n + 1 );
-    Zt[0] = 1.0;
-
-    // recurrence
-    for ( int i = 1; i <= n; i++ )
-    {
-        gemstat_dp_t sum = Zt[boundaries[i]];
-        gemstat_dp_t sum0 = sum, sum1 = sum;
-        const vector< SiteInteraction >& nbrs = left_nbrs[i];
-        for ( size_t k = 0; k < nbrs.size(); k++ )
-        {
-            int j = nbrs[k].j;
-            int dist = nbrs[k].dist;
-
-            // sum for Z0
-            sum0 += nbrs[k].w_ji * Z0[j];
-            if ( dist > repressionDistThr ) sum0 += Z1[j];
-
-            // sum for Z1
-            if ( repIndicators[ sites[i].factorIdx ] )
-            {
-                sum1 += nbrs[k].w_ji * Z1[j];
-                if ( dist > repressionDistThr ) sum1 += Z0[j];
-            }
-        }
-        Z0[i] = bindingWts[i] * sum0;
-        if ( repIndicators[ sites[i].factorIdx ] ) Z1[i] = bindingWts[i] * repEffects[ sites[i].factorIdx ] * sum1;
-        else Z1[i] = 0;
-        Zt[i] = Z0[i] + Z1[i] + Zt[i - 1];
-    }
-
-    // the partition function
-    return Zt[n];
-}
-
+gemstat_dp_t ExprFunc::compPartFuncOff() const { return kernelOffBasic( plain ); }
+gemstat_ad_t ExprFunc::compPartFuncOffAD( const ThermoVals< gemstat_ad_t >& v ) const { return kernelOffBasic( v ); }
 
 gemstat_dp_t ExprFunc::compPartFuncOn() const
 {
-    /*
-    if ( modelOption == DIRECT ) assert(false);//should never make it here.
-    if ( modelOption == QUENCHING ) assert(false);
-    if ( modelOption == CHRMOD_UNLIMITED) assert(false);//return compPartFuncOnChrMod_Unlimited();
-    if ( modelOption == CHRMOD_LIMITED ) assert(false);//return compPartFuncOnChrMod_Limited();
-    */
-//TODO: A compiler warning is generated here. Shouldn't there be some defensive coding?
-    assert(false);
-    return 0.0;
+    throw std::logic_error( "ExprFunc::compPartFuncOn: no on-state partition function for this model" );
 }
-
-
-gemstat_dp_t Direct_ExprFunc::compPartFuncOn() const
+gemstat_ad_t ExprFunc::compPartFuncOnAD( const ThermoVals< gemstat_ad_t >& v ) const
 {
-    int n = n_sites;
-
-    // initialization
-    vector< gemstat_dp_t > Z( n + 1 );
-    Z[0] = 1.0;
-    vector< gemstat_dp_t > Zt( n + 1 );
-    Zt[0] = 1.0;
-
-    // recurrence
-    for ( int i = 1; i <= n; i++ )
-    {
-        gemstat_dp_t sum = Zt[boundaries[i]];
-        const vector< SiteInteraction >& nbrs = left_nbrs[i];
-        for ( size_t k = 0; k < nbrs.size(); k++ )
-        {
-            sum += nbrs[k].w_ji * Z[ nbrs[k].j ];
-        }
-        //Z[i] = bindingWts[ i ] * txpEffects[ sites[i].factorIdx ] * sum;
-        if( actIndicators[ sites[ i ].factorIdx ] )
-        {
-            Z[ i ] = bindingWts[ i ] * txpEffects[ sites[ i ].factorIdx ] * sum;
-            //cout << "1: " << txpEffects[ sites[ i ].factorIdx ] << endl;
-        }
-        if( repIndicators[ sites[ i ].factorIdx ] )
-        {
-            Z[ i ] = bindingWts[ i ] * repEffects[ sites[ i ].factorIdx ] * sum;
-            //cout << "2: " << repEffects[ sites[ i ].factorIdx ] << endl;
-        }
-        //cout << "DEBUG 0: " << sum << "\t" << Zt[ i - 1] << endl;
-        Zt[i] = Z[i] + Zt[i - 1];
-        /*if( actIndicators[ sites[ i ].factorIdx ] )
-            cout << "DEBUG 1: " << Zt[i] << "\t" << bindingWts[i]*txpEffects[sites[i].factorIdx]*(Zt[ i - 1] + 1) << endl;
-        if( repIndicators[ sites[ i ].factorIdx ] )
-            cout << "DEBUG 2: " << Zt[i] << "\t" << bindingWts[i]*repEffects[sites[i].factorIdx]*(Zt[ i - 1] + 1) << endl;*/
-    }
-
-    return Zt[n];
+    throw std::logic_error( "ExprFunc::compPartFuncOnAD: no on-state partition function for this model" );
 }
 
+gemstat_dp_t Direct_ExprFunc::compPartFuncOn() const { return kernelOnDirect( plain ); }
+gemstat_ad_t Direct_ExprFunc::compPartFuncOnAD( const ThermoVals< gemstat_ad_t >& v ) const { return kernelOnDirect( v ); }
 
-gemstat_dp_t Quenching_ExprFunc::compPartFuncOn() const
+Quenching_ExprFunc::Quenching_ExprFunc( const ExprModel* _model, const ExprPar& _par , const SiteVec& sites_, const int seq_len, const int seq_num) : ExprFunc( _model, _par , sites_, seq_len, seq_num)
 {
-    int n = n_sites;
-    int N0 = maxContact;
-    Matrix Z1(n+1, N0+1);
-    Matrix Z0(n+1, N0+1);
-
-    // k = 0
-    for ( int i = 0; i <= n; i++ )
-    {
-        gemstat_dp_t sum1 = 1, sum0 = 0;
-        const vector< SiteInteraction >& nbrs = all_left_nbrs[i];
-        for ( size_t kk = 0; kk < nbrs.size(); kk++ )
-        {
-            int j = nbrs[kk].j;
-            bool R = nbrs[kk].rep_ji;
-            gemstat_dp_t term = nbrs[kk].w_ji * ( Z1.getElement(j,0) + Z0.getElement(j,0) );
-            sum1 += ( 1 - R )* term;
-            sum0 += R * term;
-        }
-	Z1.setElement(i,0, bindingWts[i] * sum1);
-	Z0.setElement(i,0, bindingWts[i] * sum0);
-    }
-
-    // k >= 1
-    for ( int k = 1; k <= N0; k++ )
-    {
-        for ( int i = 0; i <= n; i++ )
-        {
-            if ( i < k )
-            {
-                Z1.setElement(i,k,0.0);
-                Z0.setElement(i,k,0.0);
-                continue;
-            }
-            gemstat_dp_t sum1 = 0, sum0 = 0;
-            const vector< SiteInteraction >& nbrs = all_left_nbrs[i];
-            for ( size_t kk = 0; kk < nbrs.size(); kk++ )
-            {
-                int j = nbrs[kk].j;
-                bool R = nbrs[kk].rep_ji;
-                gemstat_dp_t effect = actIndicators[sites[j].factorIdx] * ( 1 - nbrs[kk].rep_ij ) * Z1.getElement(j,k-1) * txpEffects[sites[j].factorIdx];
-                gemstat_dp_t term = nbrs[kk].w_ji * ( Z1.getElement(j,k) + Z0.getElement(j,k) + effect );
-                sum1 += ( 1 - R )* term;
-                sum0 += R * term;
-            }
-            Z1.setElement(i,k,bindingWts[i] * sum1);
-            Z0.setElement(i,k,bindingWts[i] * sum0);
-        }
-    }
-
-    //     for ( int i = 1; i <= n; i++ ) {
-    //         for ( int k = 0; k <= N0; k++ ) {
-    //             cout << "Z1(" << i << ", " << k << ") = " << Z1[i][k] << "\t";
-    //             cout << "Z0(" << i << ", " << k << ") = " << Z0[i][k] << endl;
-    //         }
-    //         cout << endl;
-    //     }
-
-    // the partition function
-    gemstat_dp_t Z_on = 1;
-    for ( int i = 1; i <= n; i++ )
-    {
-        for ( int k = 0; k <= N0; k++ )
-        {
-            gemstat_dp_t term = Z1.getElement(i,k) + Z0.getElement(i,k);
-            Z_on += term;
-        }
-        for ( int k = 0; k <= N0 - 1; k++ )
-        {
-            Z_on += actIndicators[sites[i].factorIdx] * Z1.getElement(i,k) * txpEffects[sites[i].factorIdx];
-        }
-    }
-    return Z_on;
+    buildLeftNeighbours( false, all_left_nbrs );   // the on-state recurrence is not window-limited
+    this->fillPlainWeights();
 }
+gemstat_dp_t Quenching_ExprFunc::compPartFuncOn() const { return kernelOnQuenching( plain ); }
+gemstat_ad_t Quenching_ExprFunc::compPartFuncOnAD( const ThermoVals< gemstat_ad_t >& v ) const { return kernelOnQuenching( v ); }
 
+gemstat_dp_t ChrMod_ExprFunc::compPartFuncOff() const { return kernelOffChrMod( plain ); }
+gemstat_ad_t ChrMod_ExprFunc::compPartFuncOffAD( const ThermoVals< gemstat_ad_t >& v ) const { return kernelOffChrMod( v ); }
 
-gemstat_dp_t ChrModUnlimited_ExprFunc::compPartFuncOn() const
-{
-    int n = n_sites;
+gemstat_dp_t ChrModUnlimited_ExprFunc::compPartFuncOn() const { return kernelOnChrModUnlimited( plain ); }
+gemstat_ad_t ChrModUnlimited_ExprFunc::compPartFuncOnAD( const ThermoVals< gemstat_ad_t >& v ) const { return kernelOnChrModUnlimited( v ); }
 
-    // initialization
-    vector< gemstat_dp_t > Z0( n + 1 );
-    Z0[0] = 1.0;
-    vector< gemstat_dp_t > Z1( n + 1 );
-    Z1[0] = 1.0;
-    vector< gemstat_dp_t > Zt( n + 1 );
-    Zt[0] = 1.0;
+gemstat_dp_t ChrModLimited_ExprFunc::compPartFuncOn() const { return kernelOnChrModLimited( plain ); }
+gemstat_ad_t ChrModLimited_ExprFunc::compPartFuncOnAD( const ThermoVals< gemstat_ad_t >& v ) const { return kernelOnChrModLimited( v ); }
 
-    // recurrence
-    for ( int i = 1; i <= n; i++ )
-    {
-        gemstat_dp_t sum = Zt[boundaries[i]];
-        gemstat_dp_t sum0 = sum, sum1 = sum;
-        const vector< SiteInteraction >& nbrs = left_nbrs[i];
-        for ( size_t k = 0; k < nbrs.size(); k++ )
-        {
-            int j = nbrs[k].j;
-            int dist = nbrs[k].dist;
-
-            // sum for Z0
-            sum0 += nbrs[k].w_ji * Z0[j];
-            if ( dist > repressionDistThr ) sum0 += Z1[j];
-
-            // sum for Z1
-            if ( repIndicators[ sites[i].factorIdx ] )
-            {
-                sum1 += nbrs[k].w_ji * Z1[j];
-                if ( dist > repressionDistThr ) sum1 += Z0[j];
-            }
-        }
-        Z0[i] = bindingWts[i] * txpEffects[ sites[i].factorIdx ] * sum0;
-        if ( repIndicators[ sites[i].factorIdx ] ) Z1[i] = bindingWts[i] * repEffects[ sites[i].factorIdx ] * sum1;
-        else Z1[i] = 0;
-        Zt[i] = Z0[i] + Z1[i] + Zt[i - 1];
-    }
-
-    // the partition function
-    return Zt[n];
-}
-
-
-gemstat_dp_t ChrModLimited_ExprFunc::compPartFuncOn() const
-{
-    int n = n_sites;
-
-    // initialization
-    int N0 = maxContact;
-    Matrix Z0( n + 1, N0 + 1 );
-    Matrix Z1( n + 1, N0 + 1 );
-    Matrix Zt( n + 1, N0 + 1 );
-    Z0.setElement(0,0,0.0);
-    Z1.setElement(0,0,0.0);
-    Zt.setElement(0,0,1.0);
-    for ( int k = 1; k <= N0; k++ )
-    {
-        Z0.setElement(0,k,0.0);
-        Z1.setElement(0,k,0.0);
-        Zt.setElement(0,k,0.0);
-    }
-
-    // recurrence
-    for ( int k = 0; k <= N0; k++ )
-    {
-        for ( int i = 1; i <= n; i++ )
-        {
-            //             cout << "k = " << k << " i = " << i << endl;
-            gemstat_dp_t sum0 = Zt.getElement(boundaries[i],k);
-	    gemstat_dp_t sum0A = k > 0 ? Zt.getElement(boundaries[i],k-1) : 0.0;
-	    gemstat_dp_t sum1 = sum0;
-
-            const vector< SiteInteraction >& nbrs = left_nbrs[i];
-            for ( size_t kk = 0; kk < nbrs.size(); kk++ )
-            {
-                int j = nbrs[kk].j;
-                int dist = nbrs[kk].dist;
-                double w_ji = nbrs[kk].w_ji;
-
-                // sum for Z0
-                sum0 += w_ji * Z0.getElement(j,k);
-                sum0A += k > 0 ? w_ji * Z0.getElement(j,k-1) : 0;
-                if ( dist > repressionDistThr )
-                {
-                    sum0 += Z1.getElement(j,k);
-                    sum0A += k > 0 ? Z1.getElement(j,k-1) : 0;
-                }
-
-                // sum for Z1
-                if ( repIndicators[ sites[i].factorIdx ] )
-                {
-                    sum1 += w_ji * Z1.getElement(j,k);
-                    if ( dist > repressionDistThr ) sum1 += Z0.getElement(j,k);
-                }
-            }
-            Z0.setElement(i,k,bindingWts[i] * sum0);
-            if ( actIndicators[sites[i].factorIdx] ) Z0(i,k) += k > 0 ? bindingWts[i] * txpEffects[sites[i].factorIdx] * sum0A : 0;
-            if ( repIndicators[ sites[i].factorIdx ] ) Z1(i,k) = bindingWts[i] * repEffects[ sites[i].factorIdx ] * sum1;
-            else Z1.setElement(i,k,0.0);
-            Zt.setElement(i,k,Z0.getElement(i,k) + Z1.getElement(i,k) + Zt.getElement(i - 1,k));
-            //             cout << "i = " << i << " k = " << k << " Z0 = " << Z0[i][k] << " Z1 = " << Z1[i][k] << " Zt = " << Zt[i][k] << endl;
-        }
-    }
-
-    // the partition function
-    //     cout << "Zt[n] = " << Zt[n] << endl;
-    return sum( Zt.getRow(n) );//And we end up with a vector anyway. See about fixing this.
-}
+/*****************************************************
+ * Pairwise terms
+ ******************************************************/
 
 double ExprFunc::compFactorInt( const Site& a, const Site& b ) const
 {
@@ -761,9 +486,6 @@ double ExprFunc::compFactorInt( const Site& a, const Site& b ) const
 
     FactorIntFunc* an_int_func = expr_model->coop_setup->coop_func_for(a.factorIdx, b.factorIdx);
     return an_int_func->compFactorInt( maxInt, dist, a.strand, b.strand );
-
-    //TODO: we need to get this information from the expr_model.
-    //This is going to be very slow, we should have cached it.
 }
 
 

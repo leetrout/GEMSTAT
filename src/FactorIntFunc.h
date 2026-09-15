@@ -32,6 +32,14 @@ class FactorIntFunc
         virtual ~FactorIntFunc(){};
         // compute the factor interaction, given the normal interaction (when they are close enough)
         virtual double compFactorInt( double normalInt, double dist, bool a_strand, bool b_strand ) const = 0;
+        /*
+         * The same interaction as an affine function of the pair's "normal"
+         * interaction parameter, so it can be evaluated on any scalar type
+         * (in particular a differentiable one):
+         *   w = post * ( clamp_to_one ? max( 1, scale * normalInt + offset ) : scale * normalInt + offset )
+         * Every implementation reproduces compFactorInt() branch for branch.
+         */
+        virtual void affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const = 0;
 
         double getMaxDist() const
         {
@@ -47,6 +55,8 @@ class Null_FactorIntFunc : public FactorIntFunc
     public:
         Null_FactorIntFunc ( ) : FactorIntFunc( 0, 1.0){};
         double compFactorInt( double normalInt, double dist, bool a_strand, bool b_strand ) const { return 1.0;}
+        void affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const
+        { scale = 0.0; offset = 1.0; clamp_to_one = false; post = 1.0; }
 };
 
 /* FactorIntFuncBinary class: binary distance function */
@@ -58,6 +68,7 @@ class FactorIntFuncBinary : public FactorIntFunc
 
         // compute the factor interaction
         double compFactorInt( double normalInt, double dist, bool a_strand, bool b_strand ) const;
+        void affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const;
 
 
 };
@@ -74,6 +85,7 @@ class FactorIntFuncGaussian : public FactorIntFunc
 
         // compute the factor interaction
         double compFactorInt( double normalInt, double dist, bool a_strand, bool b_strand ) const;
+        void affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const;
     private:
         double sigma;                             // standard deviation of
 };
@@ -88,6 +100,7 @@ class FactorIntFuncGeometric : public FactorIntFunc
 
         // compute the factor interaction
         double compFactorInt( double normalInt, double dist, bool a_strand, bool b_strand ) const;
+        void affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const;
 
     private:
         double spacingEffect;                     // the effect of spacing
@@ -103,6 +116,7 @@ class FactorIntFuncHelical : public FactorIntFunc
 
         // compute the factor interaction
         double compFactorInt( double normalInt, double dist, bool a_strand, bool b_strand ) const;
+        void affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const;
 };
 
 /* Dimer interaction class: binary distance function */
@@ -118,6 +132,7 @@ class Dimer_FactorIntFunc : public FactorIntFunc
 
         // compute the factor interaction
         virtual double compFactorInt( double normalInt, double dist, bool a_strand, bool b_strand ) const;
+        virtual void affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const;
 
         bool expected_a_strand;
         bool expected_b_strand;
@@ -137,6 +152,7 @@ class HalfDirectional_FactorIntFunc : public Dimer_FactorIntFunc
         }
     // compute the factor interaction
     double compFactorInt( double normalInt, double dist, bool a_strand, bool b_strand ) const;
+    void affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const;
     protected:
         bool enforce_a;
         bool enforce_b;

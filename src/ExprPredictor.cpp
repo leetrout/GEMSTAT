@@ -88,6 +88,9 @@ ExprPredictor::ExprPredictor( const vector <Sequence>& _seqs, const vector< Site
 
 	trainingObjective = NULL;
 
+	gradient_method = GRADIENT_AD;
+	slots = ParamSlots::build( param_factory->create_expr_par(), motifNames );
+
 	maxShift = 5;
 	shiftPenalty = 0.8;
 	min_delta_f_SSE = 1.0E-8;
@@ -585,8 +588,175 @@ void gsl_obj_df( const gsl_vector* v, void* params, gsl_vector* grad )
 
 void gsl_obj_df( const gsl_vector* v, void* params, gsl_vector* grad, double f_val )
 {
+    ExprPredictor* predictor = (ExprPredictor*)params;
+    if ( predictor->gradient_method == ExprPredictor::GRADIENT_AD ) gsl_obj_df_ad( v, params, grad );
+    else gsl_obj_df_fd( v, params, grad, f_val );
+}
+
+void gsl_obj_df_fd( const gsl_vector* v, void* params, gsl_vector* grad, double f_val )
+{
     double step = 1.0E-6;
     numeric_deriv( grad, gsl_obj_f, v, params, step, f_val );
+}
+
+void gsl_obj_df_ad( const gsl_vector* v, void* params, gsl_vector* grad )
+{
+    ExprPredictor* predictor = (ExprPredictor*)params;
+
+    // the same parameter object gsl_obj_f evaluates
+    vector< double > temp_free_pars = gsl2vector( v );
+    vector< double > all_pars;
+    predictor->param_factory->joinParams( temp_free_pars, predictor->fix_pars, all_pars, predictor->indicator_bool );
+    ExprPar par = predictor->param_factory->create_expr_par( all_pars, ENERGY_SPACE );
+    par = predictor->param_factory->changeSpace( par, PROB_SPACE );
+
+    vector< double > g_prob;
+    predictor->gradient_prob( par, g_prob );
+
+    // the optimizer works in ENERGY_SPACE: p_k = exp( e_k ), so d/de_k = p_k d/dp_k;
+    // and only on the free parameters
+    vector< double > flat_prob;
+    par.getRawPars( flat_prob );
+    int c = 0;
+    for ( size_t k = 0; k < flat_prob.size(); k++ )
+    {
+        if ( predictor->indicator_bool[k] ) gsl_vector_set( grad, c++, g_prob[k] * flat_prob[k] );
+    }
+}
+
+void ExprPredictor::gradient_prob( const ExprPar& par, vector< double >& grad ) const
+{
+    if ( par.my_space != PROB_SPACE ) throw std::invalid_argument( "ExprPredictor::gradient_prob: par must be in PROB_SPACE" );
+    typedef gemstat_ad_t V;
+    typedef gemstat_ad::Tape< gemstat_dp_t > TapeT;
+
+    const int n_pars = slots.n_pars;
+    const int n = nSeqs();
+    const int nc = nConds();
+
+    // the objective's own derivatives, at the plain predictions
+    vector< vector< double > > ground_truths( n ), predictions;
+    for ( int i = 0; i < n; i++ ) ground_truths[i] = training_data->get_output_row( i );
+    this->predict_all( par, predictions );
+    vector< vector< double > > d_pred;
+    vector< double > d_pars( n_pars, 0.0 );
+    trainingObjective->gradient( ground_truths, predictions, &par, &slots, d_pred, d_pars );
+
+    vector< double > flat;
+    par.getRawPars( flat );
+    if ( (int)flat.size() != n_pars ) throw std::logic_error( "ExprPredictor::gradient_prob: parameter layout changed" );
+
+    // zero-weighted bins are not predicted during training (see predict())
+    Matrix* weights = NULL;
+    Weighted_ObjFunc_Mixin* tmp_weighted = dynamic_cast< Weighted_ObjFunc_Mixin* >( this->trainingObjective );
+    if ( NULL != tmp_weighted ) weights = tmp_weighted->get_weights();
+
+    vector< int > seqLengths( n );
+    for ( int i = 0; i < n; i++ ) seqLengths[i] = seqs[i].size();
+
+    // one reverse pass per sequence, seeded with d objective / d prediction
+    vector< vector< double > > seq_grad( n, vector< double >( n_pars, 0.0 ) );
+    std::string first_error;
+    #ifdef _OPENMP
+    #pragma omp parallel
+    #endif
+    {
+        TapeT tape;
+        tape.activate();
+        #ifdef _OPENMP
+        #pragma omp for schedule(dynamic)
+        #endif
+        for ( int i = 0; i < n; i++ )
+        {
+            try {
+                tape.clear();
+                vector< V > vars( n_pars );
+                for ( int k = 0; k < n_pars; k++ ) vars[k] = V::input( flat[k] );
+
+                ExprFunc* func = createExprFunc( par, seqSites[i], seqLengths[i], i );
+                ThermoVals< V > vals = func->makeVals( vars, slots );
+                vector< int > out_index( nc, -1 );
+                for ( int j = 0; j < nc; j++ )
+                {
+                    if ( this->is_training() && weights != NULL && weights->getElement( i, j ) <= 0.0 ) continue;
+                    Condition concs = training_data->getCondition( j, par );
+                    V p = func->predictExprAD( vals, concs.concs );
+                    out_index[j] = p.index();
+                }
+                delete func;
+
+                vector< gemstat_dp_t > adjoint( tape.size(), (gemstat_dp_t)0 );
+                for ( int j = 0; j < nc; j++ )
+                {
+                    if ( out_index[j] >= 0 ) adjoint[ out_index[j] ] += d_pred[i][j];
+                }
+                tape.backward( adjoint );
+                for ( int k = 0; k < n_pars; k++ ) seq_grad[i][k] = (double)adjoint[ vars[k].index() ];
+            } catch ( const std::exception& e ) {
+                #ifdef _OPENMP
+                #pragma omp critical(gemstat_gradient_error)
+                #endif
+                if ( first_error.empty() ) first_error = e.what();
+            }
+        }
+    }
+    if ( !first_error.empty() ) throw std::runtime_error( first_error );
+
+    // sum in sequence order so the result does not depend on the thread count
+    grad = d_pars;
+    for ( int i = 0; i < n; i++ )
+        for ( int k = 0; k < n_pars; k++ ) grad[k] += seq_grad[i][k];
+}
+
+bool ExprPredictor::checkGradient( const ExprPar& par_init, ostream& os, double tol )
+{
+    par_model = par_init;
+    ExprPar tmp_par_model = param_factory->changeSpace( par_model, ENERGY_SPACE );
+    param_factory->separateParams( tmp_par_model, free_pars, fix_pars, indicator_bool );
+    int n = free_pars.size();
+    gsl_vector* v = vector2gsl( free_pars );
+    gsl_vector* g_ad = gsl_vector_alloc( n );
+    gsl_vector* g_fd = gsl_vector_alloc( n );
+
+    gsl_obj_df_ad( v, this, g_ad );
+
+    // central differences in ENERGY_SPACE
+    gsl_vector* dv = gsl_vector_alloc( n );
+    for ( int k = 0; k < n; k++ )
+    {
+        double x = gsl_vector_get( v, k );
+        double h = 1.0e-5 * ( fabs( x ) > 1.0 ? fabs( x ) : 1.0 );
+        gsl_vector_memcpy( dv, v );
+        gsl_vector_set( dv, k, x + h ); double fp = gsl_obj_f( dv, this );
+        gsl_vector_set( dv, k, x - h ); double fm = gsl_obj_f( dv, this );
+        gsl_vector_set( g_fd, k, ( fp - fm ) / ( 2.0 * h ) );
+    }
+
+    // names of the free parameters, for the report
+    vector< std::string > paths;
+    ParamSlots::flatten_paths( par_model.my_pars, "", paths );
+    vector< std::string > free_names;
+    for ( size_t k = 0; k < paths.size(); k++ ) if ( indicator_bool[k] ) free_names.push_back( paths[k] );
+
+    bool ok = true;
+    double worst = 0.0;
+    os << "GRADIENT CHECK: " << n << " free parameters, objective " << getObjOptionStr( objOption ) << endl;
+    os << "parameter	autodiff	central_difference	relative_difference" << endl;
+    for ( int k = 0; k < n; k++ )
+    {
+        double a = gsl_vector_get( g_ad, k ), f = gsl_vector_get( g_fd, k );
+        double scale = fabs( a ) > fabs( f ) ? fabs( a ) : fabs( f );
+        double rel = scale > tol ? fabs( a - f ) / scale : 0.0;   // both tiny: agree
+        if ( rel > worst ) worst = rel;
+        bool this_ok = rel <= tol;
+        if ( !this_ok ) ok = false;
+        os << free_names[k] << "	" << setprecision(10) << a << "	" << f << "	" << setprecision(3) << rel << ( this_ok ? "" : "	MISMATCH" ) << endl;
+    }
+    os << "GRADIENT CHECK " << ( ok ? "PASSED" : "FAILED" ) << endl;
+    os << "GRADIENT CHECK worst relative difference " << setprecision(3) << worst << " (tolerance " << tol << ")" << endl;
+
+    gsl_vector_free( v ); gsl_vector_free( dv ); gsl_vector_free( g_ad ); gsl_vector_free( g_fd );
+    return ok;
 }
 
 

@@ -2,6 +2,7 @@
 #define OBJFUNC_H
 
 #include "ExprPar.h"
+#include "ParamSlots.h"
 
 class Weighted_ObjFunc_Mixin {
   public:
@@ -24,6 +25,21 @@ public:
 public:
   //pure virtual function
   virtual double eval(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par){return -1;}
+
+  /*
+   * Derivatives of eval() with respect to its inputs, for the reverse-mode
+   * gradient of the whole objective (ExprPredictor::gradient_prob):
+   *   d_prediction[i][j] = d eval / d prediction[i][j]
+   *   d_pars[k]         += d eval / d p_k   for the *direct* dependence on the
+   *                        flat PROB_SPACE parameter vector p of par (the
+   *                        per-sequence scale beta, regularisation terms);
+   *                        the dependence through the predictions is not
+   *                        included.  d_pars must already have par's length.
+   * The default is a central-difference approximation; objectives with a
+   * simple closed form override it.
+   */
+  virtual void gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ParamSlots* slots,
+                        vector<vector<double> >& d_prediction, vector<double>& d_pars);
 };
 
 
@@ -31,12 +47,16 @@ class RMSEObjFunc: public ObjFunc {
 public:
   ~RMSEObjFunc(){}
   double eval(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par);
+  void gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ParamSlots* slots,
+                vector<vector<double> >& d_prediction, vector<double>& d_pars);
 };
 
 class AvgCorrObjFunc: public ObjFunc {
 public:
   ~AvgCorrObjFunc(){}
   double eval(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par);
+  void gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ParamSlots* slots,
+                vector<vector<double> >& d_prediction, vector<double>& d_pars);
 };
 
 class PGPObjFunc: public ObjFunc {
@@ -75,6 +95,8 @@ public:
   RegularizedObjFunc(ObjFunc* wrapped_obj_func, const ExprPar& centers, const ExprPar& l1, const ExprPar& l2);
   ~RegularizedObjFunc(){delete my_wrapped_obj_func;}
   double eval(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par);
+  void gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ParamSlots* slots,
+                vector<vector<double> >& d_prediction, vector<double>& d_pars);
   ObjFunc* my_wrapped_obj_func;
 private:
   vector<double> my_centers;
@@ -98,6 +120,8 @@ public:
     Weighted_RMSEObjFunc() : RMSEObjFunc(), Weighted_ObjFunc_Mixin() {}
     ~Weighted_RMSEObjFunc(){};
   double eval(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par);
+  void gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ParamSlots* slots,
+                vector<vector<double> >& d_prediction, vector<double>& d_pars);
 
 };
 

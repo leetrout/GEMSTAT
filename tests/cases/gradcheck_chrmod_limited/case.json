@@ -1,0 +1,34 @@
+{
+  "args": [
+    "-s",
+    "@DATA@/seqs.fa",
+    "-e",
+    "@DATA@/expr.tab",
+    "-m",
+    "@DATA@/factors.wtmx",
+    "-f",
+    "@DATA@/factor_expr.tab",
+    "-c",
+    "@DATA@/coop.txt",
+    "-i",
+    "@TESTDATA@/factor_info_rep.txt",
+    "-p",
+    "@TESTDATA@/fitted_direct.par",
+    "-o",
+    "ChrMod_Limited",
+    "-mc",
+    "2",
+    "-rt",
+    "150",
+    "--check_gradient",
+    "-fo",
+    "out.txt"
+  ],
+  "stdout_match": [
+    "^GRADIENT CHECK (PASSED|FAILED)"
+  ],
+  "labels": [
+    "fast",
+    "gradient"
+  ]
+}

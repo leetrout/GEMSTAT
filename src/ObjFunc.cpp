@@ -223,3 +223,159 @@ void Weighted_ObjFunc_Mixin::set_weights(Matrix *in_weights){
         }
     }
 }
+
+
+/*****************************************************
+ * Gradients (see ObjFunc::gradient in ObjFunc.h)
+ ******************************************************/
+
+// the flat PROB_SPACE index of the beta that scales sequence i
+static int beta_slot_for( const ExprPar* par, const ParamSlots* slots, int i )
+{
+    if ( NULL == par || NULL == slots || slots->beta.empty() ) return -1;
+    int use_enhancerID = par->my_factory->expr_model.shared_scaling ? 0 : i;
+    return use_enhancerID < (int)slots->beta.size() ? slots->beta[ use_enhancerID ] : -1;
+}
+
+void ObjFunc::gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ParamSlots* slots,
+                       vector<vector<double> >& d_prediction, vector<double>& d_pars)
+{
+    // central differences: eval() is cheap compared with a prediction pass
+    vector<vector<double> > pred = prediction;
+    d_prediction.assign( pred.size(), vector<double>() );
+    for ( size_t i = 0; i < pred.size(); i++ )
+    {
+        d_prediction[i].assign( pred[i].size(), 0.0 );
+        for ( size_t j = 0; j < pred[i].size(); j++ )
+        {
+            double x = pred[i][j];
+            double h = 1.0e-6 * ( fabs( x ) > 1.0 ? fabs( x ) : 1.0 );
+            pred[i][j] = x + h; double fp = eval( ground_truth, pred, par );
+            pred[i][j] = x - h; double fm = eval( ground_truth, pred, par );
+            pred[i][j] = x;
+            d_prediction[i][j] = ( fp - fm ) / ( 2.0 * h );
+        }
+    }
+
+    if ( NULL == par ) return;
+    vector<double> flat;
+    par->getRawPars( flat );
+    for ( size_t k = 0; k < flat.size(); k++ )
+    {
+        double x = flat[k];
+        double h = 1.0e-6 * ( fabs( x ) > 1.0 ? fabs( x ) : 1.0 );
+        flat[k] = x + h; ExprPar pp = par->my_factory->create_expr_par( flat, PROB_SPACE ); double fp = eval( ground_truth, prediction, &pp );
+        flat[k] = x - h; ExprPar pm = par->my_factory->create_expr_par( flat, PROB_SPACE ); double fm = eval( ground_truth, prediction, &pm );
+        flat[k] = x;
+        d_pars[k] += ( fp - fm ) / ( 2.0 * h );
+    }
+}
+
+void RMSEObjFunc::gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ParamSlots* slots,
+                           vector<vector<double> >& d_prediction, vector<double>& d_pars)
+{
+    // rmse = sqrt( sum_ij ( beta_i p_ij - g_ij )^2 / N )
+    int nSeqs = ground_truth.size();
+    int nConds = ground_truth[0].size();
+    double N = (double)nSeqs * nConds;
+    double rmse = eval( ground_truth, prediction, par );
+    d_prediction.assign( nSeqs, vector<double>( nConds, 0.0 ) );
+    if ( rmse <= 0.0 ) return;   // exact fit: the derivative is not defined, use 0
+
+    for ( int i = 0; i < nSeqs; i++ )
+    {
+        double beta = 1.0;
+        int bslot = -1;
+        #ifdef BETAOPTTOGETHER
+        if ( NULL != par ) { beta = par->getBetaForSeq(i); bslot = beta_slot_for( par, slots, i ); }
+        #else
+        // the objective solves for the best beta itself; by the envelope theorem
+        // the derivative with respect to the predictions is the partial at that beta
+        { double num = 0, den = 0;
+          for ( int j = 0; j < nConds; j++ ) { num += prediction[i][j] * ground_truth[i][j]; den += prediction[i][j] * prediction[i][j]; }
+          beta = num / den; }
+        #endif
+        double dbeta = 0.0;
+        for ( int j = 0; j < nConds; j++ )
+        {
+            double r = beta * prediction[i][j] - ground_truth[i][j];
+            d_prediction[i][j] = beta * r / ( N * rmse );
+            dbeta += prediction[i][j] * r / ( N * rmse );
+        }
+        if ( bslot >= 0 ) d_pars[bslot] += dbeta;
+    }
+}
+
+void Weighted_RMSEObjFunc::gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ParamSlots* slots,
+                                    vector<vector<double> >& d_prediction, vector<double>& d_pars)
+{
+    // rmse = sqrt( sum_ij w_ij ( beta_i p_ij - g_ij )^2 / total_weight )
+    int nSeqs = ground_truth.size();
+    int nConds = ground_truth[0].size();
+    double rmse = eval( ground_truth, prediction, par );
+    d_prediction.assign( nSeqs, vector<double>( nConds, 0.0 ) );
+    if ( rmse <= 0.0 ) return;
+
+    for ( int i = 0; i < nSeqs; i++ )
+    {
+        double beta = 1.0;
+        int bslot = -1;
+        if ( NULL != par ) { beta = par->getBetaForSeq(i); bslot = beta_slot_for( par, slots, i ); }
+        double dbeta = 0.0;
+        for ( int j = 0; j < nConds; j++ )
+        {
+            double w = weights->getElement(i,j);
+            double r = beta * prediction[i][j] - ground_truth[i][j];
+            d_prediction[i][j] = w * beta * r / ( total_weight * rmse );
+            dbeta += w * prediction[i][j] * r / ( total_weight * rmse );
+        }
+        if ( bslot >= 0 ) d_pars[bslot] += dbeta;
+    }
+}
+
+void RegularizedObjFunc::gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ParamSlots* slots,
+                                  vector<vector<double> >& d_prediction, vector<double>& d_pars)
+{
+    my_wrapped_obj_func->gradient( ground_truth, prediction, par, slots, d_prediction, d_pars );
+
+    // penalties are on the ENERGY_SPACE values e_k = log p_k
+    vector<double> flat;
+    par->getRawPars( flat );
+    for ( size_t k = 0; k < flat.size(); k++ )
+    {
+        double diff = log( flat[k] ) - my_centers[k];
+        double sign = diff > 0 ? 1.0 : ( diff < 0 ? -1.0 : 0.0 );
+        d_pars[k] += ( lambda1[k] * sign + 2.0 * lambda2[k] * diff ) / flat[k];
+    }
+}
+
+void AvgCorrObjFunc::gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ParamSlots* slots,
+                              vector<vector<double> >& d_prediction, vector<double>& d_pars)
+{
+    // objective = - mean_i corr( prediction_i, ground_truth_i ); no direct parameter dependence
+    int nSeqs = ground_truth.size();
+    d_prediction.assign( nSeqs, vector<double>() );
+    for ( int i = 0; i < nSeqs; i++ )
+    {
+        const vector<double>& x = prediction[i];
+        const vector<double>& y = ground_truth[i];
+        int n = x.size();
+        d_prediction[i].assign( n, 0.0 );
+        double x_bar = mean( x ), y_bar = mean( y );
+        double sxx = 0, syy = 0, sxy = 0;
+        for ( int j = 0; j < n; j++ )
+        {
+            sxx += ( x[j] - x_bar ) * ( x[j] - x_bar );
+            syy += ( y[j] - y_bar ) * ( y[j] - y_bar );
+            sxy += ( x[j] - x_bar ) * ( y[j] - y_bar );
+        }
+        if ( sxx <= 0.0 || syy <= 0.0 ) continue;   // corr undefined: eval() returns NaN there anyway
+        double denom = sqrt( sxx * syy );
+        double corr_xy = sxy / denom;
+        for ( int j = 0; j < n; j++ )
+        {
+            double dcorr = ( y[j] - y_bar ) / denom - corr_xy * ( x[j] - x_bar ) / sxx;
+            d_prediction[i][j] = -dcorr / nSeqs;
+        }
+    }
+}

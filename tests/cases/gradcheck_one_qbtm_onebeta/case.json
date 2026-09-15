@@ -1,0 +1,30 @@
+{
+  "args": [
+    "-s",
+    "@DATA@/seqs.fa",
+    "-e",
+    "@DATA@/expr.tab",
+    "-m",
+    "@DATA@/factors.wtmx",
+    "-f",
+    "@DATA@/factor_expr.tab",
+    "-c",
+    "@DATA@/coop.txt",
+    "-i",
+    "@DATA@/factor_info.txt",
+    "-o",
+    "Direct",
+    "-oq",
+    "-onebeta",
+    "--check_gradient",
+    "-fo",
+    "out.txt"
+  ],
+  "stdout_match": [
+    "^GRADIENT CHECK (PASSED|FAILED)"
+  ],
+  "labels": [
+    "fast",
+    "gradient"
+  ]
+}
