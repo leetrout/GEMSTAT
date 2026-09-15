@@ -44,6 +44,19 @@ else()
     message(FATAL_ERROR "GEMSTAT_BETA_OPTIMIZE must be 'together' or 'separate', got '${GEMSTAT_BETA_OPTIMIZE}'")
 endif()
 message(STATUS "GEMSTAT_BETA_OPTIMIZE = ${GEMSTAT_BETA_OPTIMIZE}")
+
+# Sequences are predicted independently of each other inside every objective
+# evaluation; with OpenMP they are predicted in parallel (see --threads).
+option(GEMSTAT_OPENMP "Predict sequences in parallel with OpenMP" ON)
+if(GEMSTAT_OPENMP)
+    find_package(OpenMP)
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(gem_everything OpenMP::OpenMP_CXX)
+        message(STATUS "OpenMP found: sequences will be predicted in parallel")
+    else()
+        message(STATUS "OpenMP not found: single-threaded build")
+    endif()
+endif()
 target_link_libraries(gem_everything GS_tools GS_annot)
 target_link_libraries(gem_everything snot)
 target_link_libraries(gem_everything "nlopt")#should get includes

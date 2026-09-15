@@ -130,7 +130,7 @@ class ParFactory
     friend class ExprPar;
     public:
       ParFactory( const ExprModel& in_model, int in_nSeqs);
-      ~ParFactory(){};
+      virtual ~ParFactory(){};
 
       //the raison d'etre for this class
       //virtual void set_prototype(const gsparams::DictList& in);

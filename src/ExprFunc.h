@@ -18,6 +18,7 @@ class ExprFunc
     public:
         // constructors
         ExprFunc( const ExprModel* _model, const ExprPar& _par , const SiteVec& sites_, const int seq_len, const int seq_num);
+        virtual ~ExprFunc() {}  // ExprFuncs are created by ExprModel and deleted through this base pointer
 
         // access methods
         const vector< Motif >& getMotifs() const

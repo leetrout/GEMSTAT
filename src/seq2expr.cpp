@@ -28,6 +28,9 @@
 
 #include "ExprModel.h"
 #include "ExprPredictor.h"
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 #include "ObjFunc.h"
 
@@ -144,6 +147,15 @@ int main( int argc, char* argv[] )
             factor_thr_file = argv[ ++i ];
 	else if ( !strcmp( "--seed", argv[ i ]))
 	    initialSeed = atol( argv[++i] );
+	else if ( !strcmp( "--threads", argv[ i ]))
+	{
+	    int n_threads = atoi( argv[++i] );
+	    #ifdef _OPENMP
+	    if ( n_threads > 0 ) omp_set_num_threads( n_threads );
+	    #else
+	    if ( n_threads > 1 ) cerr << "Warning: --threads ignored, this build has no OpenMP support." << endl;
+	    #endif
+	}
 	else if ( !strcmp("-po", argv[ i ]))
 	    par_out_file = argv[ ++i ]; //output file for pars at the en
   else if ( !strcmp("-onebeta", argv[ i ]))
@@ -166,7 +178,7 @@ int main( int argc, char* argv[] )
 
     if ( seqFile.empty() || exprFile.empty() || motifFile.empty() || factorExprFile.empty() || outFile.empty() || ( ( cmdline_modelOption == QUENCHING || cmdline_modelOption == CHRMOD_UNLIMITED || cmdline_modelOption == CHRMOD_LIMITED ) &&  factorInfoFile.empty() ) || ( cmdline_modelOption == QUENCHING && repressionFile.empty() ) )
     {
-        cerr << "Usage: " << argv[ 0 ] << " -s seqFile -e exprFile -m motifFile -f factorExprFile -fo outFile [-a annFile -o modelOption -c coopFile -i factorInfoFile -r repressionFile -oo objOption -mc maxContact -p parFile -rt repressionDistThr -na nAlternations -ct coopDistThr -sigma factorIntSigma --seed RNG_SEED]" << endl;
+        cerr << "Usage: " << argv[ 0 ] << " -s seqFile -e exprFile -m motifFile -f factorExprFile -fo outFile [-a annFile -o modelOption -c coopFile -i factorInfoFile -r repressionFile -oo objOption -mc maxContact -p parFile -rt repressionDistThr -na nAlternations -ct coopDistThr -sigma factorIntSigma --seed RNG_SEED --threads N]" << endl;
         cerr << "modelOption: Logistic, Direct, Quenching, ChrMod_Unlimited, ChrMod_Limited" << endl;
         exit( 1 );
     }

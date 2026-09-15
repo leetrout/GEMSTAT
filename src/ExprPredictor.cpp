@@ -3,6 +3,10 @@
 
 #include <gsl/gsl_math.h>
 #include <gsl/gsl_multimin.h>
+#include <stdexcept>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 #include <nlopt.hpp>
 
@@ -318,8 +322,6 @@ While in training mode (private in_training variable == true), this method will 
 int ExprPredictor::predict_all( const ExprPar& par , vector< vector< double > > &targetExprs ) const
 {
 	vector< int > seqLengths( seqs.size() );
-	vector< SiteVec > seqSites( seqs.size() ); //
-	targetExprs.clear();
 
     for( int i = 0; i < seqs.size(); i++ ){
       seqLengths[i] = seqs[i].size();
@@ -327,22 +329,38 @@ int ExprPredictor::predict_all( const ExprPar& par , vector< vector< double > > 
 
 
     #ifdef REANNOTATE_EACH_PREDICTION
+    vector< SiteVec > seqSites( seqs.size() );
     SeqAnnotator ann( expr_model.motifs, par.energyThrFactors );
     for ( int i = 0; i < seqs.size(); i++ ) {
        	ann.annot( seqs[ i ], seqSites[ i ] );
     }
     #else
-    seqSites = this->seqSites;
+    const vector< SiteVec >& seqSites = this->seqSites;
     #endif
 
-    //Create predictions for every sequence and condition
-    for ( int i = 0; i < nSeqs(); i++ ) {
-			vector<double> one_seq_predictions(nConds());
-
-			this->predict(par, seqSites[i], seqLengths[i], one_seq_predictions, i );
-
-			targetExprs.push_back(one_seq_predictions);
+    //Create predictions for every sequence and condition.
+    //Sequences are independent: each iteration only reads shared state (the
+    //parameters, the dataset, the model) and writes its own slot of targetExprs,
+    //so the result does not depend on the thread schedule.
+    const int n = nSeqs();
+    targetExprs.assign( n, vector< double >() );
+    std::string first_error;
+    #ifdef _OPENMP
+    #pragma omp parallel for schedule(dynamic)
+    #endif
+    for ( int i = 0; i < n; i++ ) {
+        try {
+            vector<double> one_seq_predictions(nConds());
+            this->predict(par, seqSites[i], seqLengths[i], one_seq_predictions, i );
+            targetExprs[i].swap( one_seq_predictions );
+        } catch ( const std::exception& e ) {
+            #ifdef _OPENMP
+            #pragma omp critical(gemstat_predict_all_error)
+            #endif
+            if ( first_error.empty() ) first_error = e.what();
+        }
     }
+    if ( !first_error.empty() ) throw std::runtime_error( first_error );
 
 	return 0;
 }

@@ -23,7 +23,7 @@ class DataSet{
 public:
   DataSet(const Matrix& tf_concentrations, const Matrix& output_values);
   DataSet(const DataSet &other) : exprData(other.exprData), factorExprData(other.factorExprData){};
-  ~DataSet(){};
+  virtual ~DataSet(){};
 
   virtual int nConds() const;//number of columns
   virtual int n_rows_output() const;
