@@ -63,6 +63,30 @@ class ExprFunc
         // intermediate computational results
         vector< gemstat_dp_t > bindingWts;
 
+        /*
+         * Per-sequence cache of everything in the DP inner loops that does not
+         * depend on the condition (the TF concentrations): which earlier sites a
+         * site can interact with (no overlap, inside the interaction window), the
+         * pairwise interaction weight in both argument orders, the distance and
+         * both repression flags.  The DP recurrences below are evaluated once per
+         * condition, so without this cache all of that was recomputed for every
+         * condition even though it only changes with the parameters.  Lists keep
+         * the iteration order of the original loops so results are bit-identical.
+         */
+        struct SiteInteraction {
+            int j;          // index of the other site
+            int dist;       // |sites[i].start - sites[j].start|
+            double w_ij;    // compFactorInt( sites[i], sites[j] )
+            double w_ji;    // compFactorInt( sites[j], sites[i] )
+            bool rep_ij;    // testRepression( sites[i], sites[j] )
+            bool rep_ji;    // testRepression( sites[j], sites[i] )
+        };
+        vector< vector< SiteInteraction > > left_nbrs;   // left_nbrs[i]: sites j in (boundaries[i], i), increasing j
+        // Fill out[i] with the non-overlapping sites j < i, in increasing j.
+        // within_boundaries limits j to (boundaries[i], i) as most recurrences do;
+        // the Quenching on-state recurrence considers every earlier site.
+        void buildLeftNeighbours( bool within_boundaries, vector< vector< SiteInteraction > >& out ) const;
+
 
         // compute the TF-TF interaction between two occupied sites
         double compFactorInt( const Site& a, const Site& b ) const;
@@ -113,6 +137,7 @@ class Markov_ExprFunc : public ExprFunc {
 
       virtual double expr_from_config( const vector< double >& marginals);
       vector<int> rev_bounds;
+      vector< vector< SiteInteraction > > right_nbrs;  // right_nbrs[i]: sites j > i, in decreasing j (the backward recurrence order)
 };
 
 class Direct_ExprFunc : public ExprFunc {
@@ -128,10 +153,11 @@ class Direct_ExprFunc : public ExprFunc {
 class Quenching_ExprFunc : public ExprFunc {
   public:
       // constructors
-      Quenching_ExprFunc( const ExprModel* _model, const ExprPar& _par , const SiteVec& sites_, const int seq_len, const int seq_num) : ExprFunc( _model, _par , sites_, seq_len, seq_num){} ;
+      Quenching_ExprFunc( const ExprModel* _model, const ExprPar& _par , const SiteVec& sites_, const int seq_len, const int seq_num) : ExprFunc( _model, _par , sites_, seq_len, seq_num){ buildLeftNeighbours( false, all_left_nbrs ); } ;
   protected:
     // compute the partition function when the BTM is bound
     gemstat_dp_t compPartFuncOn() const;
+    vector< vector< SiteInteraction > > all_left_nbrs;  // all_left_nbrs[i]: every non-overlapping site j < i (the on-state recurrence is not window-limited)
 
 };
 

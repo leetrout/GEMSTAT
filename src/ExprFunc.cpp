@@ -61,7 +61,30 @@ ExprFunc::ExprFunc( const ExprModel* _model, const ExprPar& _par , const SiteVec
 
 
     this->setupSitesAndBoundaries(sites_,seq_length, seq_num);
+    this->buildLeftNeighbours( true, left_nbrs );
 
+}
+
+void ExprFunc::buildLeftNeighbours( bool within_boundaries, vector< vector< SiteInteraction > >& out ) const
+{
+    int n = n_sites;
+    out.assign( n + 1, vector< SiteInteraction >() );
+    for ( int i = 1; i <= n; i++ )
+    {
+        int j_begin = within_boundaries ? boundaries[i] + 1 : 1;
+        for ( int j = j_begin; j < i; j++ )
+        {
+            if ( siteOverlap( sites[ i ], sites[ j ], motifs ) ) continue;
+            SiteInteraction si;
+            si.j = j;
+            si.dist = sites[i].start - sites[j].start;
+            si.w_ij = compFactorInt( sites[ i ], sites[ j ] );
+            si.w_ji = compFactorInt( sites[ j ], sites[ i ] );
+            si.rep_ij = testRepression( sites[ i ], sites[ j ] );
+            si.rep_ji = testRepression( sites[ j ], sites[ i ] );
+            out[i].push_back( si );
+        }
+    }
 }
 
 void ExprFunc::setupSitesAndBoundaries(const SiteVec& _sites, int length, int seq_num){
@@ -222,12 +245,27 @@ Markov_ExprFunc::Markov_ExprFunc( const ExprModel* _model, const ExprPar& _par ,
         rev_bounds[i] = ( boundary );
     }
     assert(rev_bounds[n_sites] == n_sites+1);
+
+    right_nbrs.assign( n_sites + 1, vector< SiteInteraction >() );
+    for ( int i = 1; i <= n_sites; i++ )
+    {
+        for ( int j = rev_bounds[i] - 1; j > i; j-- )
+        {
+            if ( siteOverlap( sites[ i ], sites[ j ], motifs ) ) continue;
+            SiteInteraction si;
+            si.j = j;
+            si.dist = sites[j].start - sites[i].start;
+            si.w_ij = compFactorInt( sites[ i ], sites[ j ] );
+            si.w_ji = compFactorInt( sites[ j ], sites[ i ] );
+            si.rep_ij = testRepression( sites[ i ], sites[ j ] );
+            si.rep_ji = testRepression( sites[ j ], sites[ i ] );
+            right_nbrs[i].push_back( si );
+        }
+    }
 }
 
 double Markov_ExprFunc::predictExpr( const vector< double >& factorConcs )
 {
-  int seq_num = this->seq_number;
-
   int n = n_sites;
   #ifdef DEBUG
   cout << "SITES size : " << sites.size() << " : n_sites : " << n_sites << endl;
@@ -261,10 +299,10 @@ double Markov_ExprFunc::predictExpr( const vector< double >& factorConcs )
     for ( int i = 1; i <= n; i++ )
     {
         gemstat_dp_t sum = Zt[boundaries[i]];
-        for ( int j = boundaries[i] + 1; j < i; j++ )
+        const vector< SiteInteraction >& nbrs = left_nbrs[i];
+        for ( size_t k = 0; k < nbrs.size(); k++ )
         {
-            if ( siteOverlap( sites[ i ], sites[ j ], motifs ) ) continue;
-            sum += compFactorInt( sites[ i ], sites[ j ] ) * Z[ j ];
+            sum += nbrs[k].w_ij * Z[ nbrs[k].j ];
         }
         Z[ i ] = bindingWts[ i ] * sum;
         Zt[i] = Z[i] + Zt[i - 1];
@@ -274,10 +312,10 @@ double Markov_ExprFunc::predictExpr( const vector< double >& factorConcs )
     for ( int i = n; i >= 1; i-- )
     {
         gemstat_dp_t sum = backward_Zt[rev_bounds[i]];
-        for ( int j = rev_bounds[i] - 1; j > i; j-- )
+        const vector< SiteInteraction >& nbrs = right_nbrs[i];
+        for ( size_t k = 0; k < nbrs.size(); k++ )
         {
-            if ( siteOverlap( sites[ i ], sites[ j ], motifs ) ) continue;
-            sum += compFactorInt( sites[ i ], sites[ j ] ) * backward_Z[ j ];
+            sum += nbrs[k].w_ij * backward_Z[ nbrs[k].j ];
         }
         backward_Z_sum[i] = sum;
         backward_Z[ i ] =  sum*bindingWts[i];
@@ -334,7 +372,6 @@ double Markov_ExprFunc::predictExpr( const vector< double >& factorConcs )
 
 double Markov_ExprFunc::expr_from_config(const vector< double >& marginals){
   double sum_total = 0.0;
-  int n = n_sites;
 
   GEMSTAT_PROMOTER_DATA_T my_promoter = par.getPromoterData( seq_number );
 
@@ -389,18 +426,17 @@ gemstat_dp_t ExprFunc::compPartFuncOff() const
             exit(1);
         }
         //cout << "DEBUG: sum = " << n << endl;
-        for ( int j = boundaries[i] + 1; j < i; j++ )
+        const vector< SiteInteraction >& nbrs = left_nbrs[i];
+        for ( size_t k = 0; k < nbrs.size(); k++ )
         {
-            if ( siteOverlap( sites[ i ], sites[ j ], motifs ) ) continue;
-            //cout << "compFactorInt: " << compFactorInt( sites[ j ], sites[ i ] ) << "\t";
-            //cout << "Z[j]: " << Z[ j ] << endl;
+            int j = nbrs[k].j;
             gemstat_dp_t old_sum = sum;
-            sum += compFactorInt( sites[ i ], sites[ j ] ) * Z[ j ];
+            sum += nbrs[k].w_ij * Z[ j ];
             if( sum != sum || isinf( sum ))
             {
                 cout << "Old sum:\t" << old_sum << endl;
                 cout << "Factors:\t" << sites[ i ].factorIdx << "\t" << sites[ j ].factorIdx << endl;
-                cout << "compFactorInt:\t" << compFactorInt( sites[ j ], sites[ i ] ) << endl;
+                cout << "compFactorInt:\t" << nbrs[k].w_ji << endl;
                 cout << "Z[j]:\t" << Z[ j ] << endl;
                 cout << i << "\t" << j << "\t" << factorIntMat( (sites[i]).factorIdx, (sites[j]).factorIdx ) << endl;
                 cout << "DEBUG: sum nan/inf\t"<< sum << endl;
@@ -444,19 +480,20 @@ gemstat_dp_t ChrMod_ExprFunc::compPartFuncOff() const
     {
         gemstat_dp_t sum = Zt[boundaries[i]];
         gemstat_dp_t sum0 = sum, sum1 = sum;
-        for ( int j = boundaries[i] + 1; j < i; j++ )
+        const vector< SiteInteraction >& nbrs = left_nbrs[i];
+        for ( size_t k = 0; k < nbrs.size(); k++ )
         {
-            if ( siteOverlap( sites[ i ], sites[ j ], motifs ) ) continue;
-            gemstat_dp_t dist = sites[i].start - sites[j].start;
+            int j = nbrs[k].j;
+            int dist = nbrs[k].dist;
 
             // sum for Z0
-            sum0 += compFactorInt( sites[j], sites[i] ) * Z0[j];
+            sum0 += nbrs[k].w_ji * Z0[j];
             if ( dist > repressionDistThr ) sum0 += Z1[j];
 
             // sum for Z1
             if ( repIndicators[ sites[i].factorIdx ] )
             {
-                sum1 += compFactorInt( sites[j], sites[i] ) * Z1[j];
+                sum1 += nbrs[k].w_ji * Z1[j];
                 if ( dist > repressionDistThr ) sum1 += Z0[j];
             }
         }
@@ -499,10 +536,10 @@ gemstat_dp_t Direct_ExprFunc::compPartFuncOn() const
     for ( int i = 1; i <= n; i++ )
     {
         gemstat_dp_t sum = Zt[boundaries[i]];
-        for ( int j = boundaries[i] + 1; j < i; j++ )
+        const vector< SiteInteraction >& nbrs = left_nbrs[i];
+        for ( size_t k = 0; k < nbrs.size(); k++ )
         {
-            if ( siteOverlap( sites[ i ], sites[ j ], motifs ) ) continue;
-            sum += compFactorInt( sites[ j ], sites[ i ] ) * Z[ j ];
+            sum += nbrs[k].w_ji * Z[ nbrs[k].j ];
         }
         //Z[i] = bindingWts[ i ] * txpEffects[ sites[i].factorIdx ] * sum;
         if( actIndicators[ sites[ i ].factorIdx ] )
@@ -538,11 +575,12 @@ gemstat_dp_t Quenching_ExprFunc::compPartFuncOn() const
     for ( int i = 0; i <= n; i++ )
     {
         gemstat_dp_t sum1 = 1, sum0 = 0;
-        for ( int j = 1; j < i; j++ )
+        const vector< SiteInteraction >& nbrs = all_left_nbrs[i];
+        for ( size_t kk = 0; kk < nbrs.size(); kk++ )
         {
-            if ( siteOverlap( sites[ i ], sites[ j ], motifs ) ) continue;
-            bool R = testRepression( sites[j], sites[i] );
-            gemstat_dp_t term = compFactorInt( sites[ j ], sites[ i ] ) * ( Z1.getElement(j,0) + Z0.getElement(j,0) );
+            int j = nbrs[kk].j;
+            bool R = nbrs[kk].rep_ji;
+            gemstat_dp_t term = nbrs[kk].w_ji * ( Z1.getElement(j,0) + Z0.getElement(j,0) );
             sum1 += ( 1 - R )* term;
             sum0 += R * term;
         }
@@ -562,12 +600,13 @@ gemstat_dp_t Quenching_ExprFunc::compPartFuncOn() const
                 continue;
             }
             gemstat_dp_t sum1 = 0, sum0 = 0;
-            for ( int j = 1; j < i; j++ )
+            const vector< SiteInteraction >& nbrs = all_left_nbrs[i];
+            for ( size_t kk = 0; kk < nbrs.size(); kk++ )
             {
-                if ( siteOverlap( sites[ i ], sites[ j ], motifs ) ) continue;
-                bool R = testRepression( sites[j], sites[i] );
-                gemstat_dp_t effect = actIndicators[sites[j].factorIdx] * ( 1 - testRepression( sites[i], sites[j] ) ) * Z1.getElement(j,k-1) * txpEffects[sites[j].factorIdx];
-                gemstat_dp_t term = compFactorInt( sites[ j ], sites[ i ] ) * ( Z1.getElement(j,k) + Z0.getElement(j,k) + effect );
+                int j = nbrs[kk].j;
+                bool R = nbrs[kk].rep_ji;
+                gemstat_dp_t effect = actIndicators[sites[j].factorIdx] * ( 1 - nbrs[kk].rep_ij ) * Z1.getElement(j,k-1) * txpEffects[sites[j].factorIdx];
+                gemstat_dp_t term = nbrs[kk].w_ji * ( Z1.getElement(j,k) + Z0.getElement(j,k) + effect );
                 sum1 += ( 1 - R )* term;
                 sum0 += R * term;
             }
@@ -619,19 +658,20 @@ gemstat_dp_t ChrModUnlimited_ExprFunc::compPartFuncOn() const
     {
         gemstat_dp_t sum = Zt[boundaries[i]];
         gemstat_dp_t sum0 = sum, sum1 = sum;
-        for ( int j = boundaries[i] + 1; j < i; j++ )
+        const vector< SiteInteraction >& nbrs = left_nbrs[i];
+        for ( size_t k = 0; k < nbrs.size(); k++ )
         {
-            gemstat_dp_t dist = sites[i].start - sites[j].start;
-            if ( siteOverlap( sites[ i ], sites[ j ], motifs ) ) continue;
+            int j = nbrs[k].j;
+            int dist = nbrs[k].dist;
 
             // sum for Z0
-            sum0 += compFactorInt( sites[j], sites[i] ) * Z0[j];
+            sum0 += nbrs[k].w_ji * Z0[j];
             if ( dist > repressionDistThr ) sum0 += Z1[j];
 
             // sum for Z1
             if ( repIndicators[ sites[i].factorIdx ] )
             {
-                sum1 += compFactorInt( sites[j], sites[i] ) * Z1[j];
+                sum1 += nbrs[k].w_ji * Z1[j];
                 if ( dist > repressionDistThr ) sum1 += Z0[j];
             }
         }
@@ -675,14 +715,16 @@ gemstat_dp_t ChrModLimited_ExprFunc::compPartFuncOn() const
 	    gemstat_dp_t sum0A = k > 0 ? Zt.getElement(boundaries[i],k-1) : 0.0;
 	    gemstat_dp_t sum1 = sum0;
 
-            for ( int j = boundaries[i] + 1; j < i; j++ )
+            const vector< SiteInteraction >& nbrs = left_nbrs[i];
+            for ( size_t kk = 0; kk < nbrs.size(); kk++ )
             {
-                double dist = sites[i].start - sites[j].start;
-                if ( siteOverlap( sites[ i ], sites[ j ], motifs ) ) continue;
+                int j = nbrs[kk].j;
+                int dist = nbrs[kk].dist;
+                double w_ji = nbrs[kk].w_ji;
 
                 // sum for Z0
-                sum0 += compFactorInt( sites[j], sites[i] ) * Z0.getElement(j,k);
-                sum0A += k > 0 ? compFactorInt( sites[j], sites[i] ) * Z0.getElement(j,k-1) : 0;
+                sum0 += w_ji * Z0.getElement(j,k);
+                sum0A += k > 0 ? w_ji * Z0.getElement(j,k-1) : 0;
                 if ( dist > repressionDistThr )
                 {
                     sum0 += Z1.getElement(j,k);
@@ -692,7 +734,7 @@ gemstat_dp_t ChrModLimited_ExprFunc::compPartFuncOn() const
                 // sum for Z1
                 if ( repIndicators[ sites[i].factorIdx ] )
                 {
-                    sum1 += compFactorInt( sites[j], sites[i] ) * Z1.getElement(j,k);
+                    sum1 += w_ji * Z1.getElement(j,k);
                     if ( dist > repressionDistThr ) sum1 += Z0.getElement(j,k);
                 }
             }
