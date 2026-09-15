@@ -1,1 +1,1 @@
-{"tfs":{"foo":{"annot_thresh":0.72345,"maxbind":7,"alpha_a":3.98347,"alpha_r":0.00180013}},"inter":{},"qbtm":[0.0121805],"enh":[{"pi":1.123,"beta":0.114998}]}
+{"tfs":{"foo":{"annot_thresh":0.72345,"maxbind":7,"alpha_a":4,"alpha_r":1}},"inter":{},"qbtm":[0.03],"enh":[{"pi":1.123,"beta":3}]}

@@ -26,6 +26,15 @@ add_subdirectory("annotation")
 
 
 add_library(gem_everything DataSet.cpp ExprFunc.cpp ExprModel.cpp ExprPar.cpp ExprPredictor.cpp FactorIntFunc.cpp IO.cpp ObjFunc.cpp PredictorTrainer.cpp)
+
+if(GEMSTAT_BETA_OPTIMIZE STREQUAL "together")
+    target_compile_definitions(gem_everything PUBLIC BETAOPTTOGETHER)
+elseif(GEMSTAT_BETA_OPTIMIZE STREQUAL "separate")
+    # nothing defined: the objective functions solve for beta themselves
+else()
+    message(FATAL_ERROR "GEMSTAT_BETA_OPTIMIZE must be 'together' or 'separate', got '${GEMSTAT_BETA_OPTIMIZE}'")
+endif()
+message(STATUS "GEMSTAT_BETA_OPTIMIZE = ${GEMSTAT_BETA_OPTIMIZE}")
 target_link_libraries(gem_everything GS_tools GS_annot)
 target_link_libraries(gem_everything snot)
 target_link_libraries(gem_everything "nlopt")#should get includes

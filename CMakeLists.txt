@@ -3,6 +3,20 @@ cmake_minimum_required(VERSION 3.20)
 
 option(DOWNLOAD_BOOST "Use this to download boost into this directory, instead of searching the system." OFF)
 
+# How the per-sequence expression scale factor ("beta") is treated during
+# training.  This mirrors --with-beta-optimize from the retired autotools
+# build, whose default was "together".
+#   together : beta is an ordinary model parameter.  The objective function
+#              uses the stored beta, so the value written to the parameter
+#              file is the one the predictions were scored with.
+#   separate : the objective solves for the best beta analytically on every
+#              evaluation and discards it; the stored beta is never fitted.
+#              (Predictions written by -fo are still multiplied by the
+#              stored beta, so it does not match the reported objective.)
+set(GEMSTAT_BETA_OPTIMIZE "together" CACHE STRING
+    "How beta is optimized during training: together (default) or separate")
+set_property(CACHE GEMSTAT_BETA_OPTIMIZE PROPERTY STRINGS together separate)
+
 
 ########## CMAKE SETUP ###########
 #For building on much newer CMAKE
