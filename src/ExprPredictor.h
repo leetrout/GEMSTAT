@@ -80,7 +80,7 @@ class ExprPredictor : public TrainingAware
         // how the gradient for the gradient optimizer is obtained
         enum GradientMethod { GRADIENT_FD, GRADIENT_AD };
         GradientMethod gradient_method;           // default GRADIENT_AD
-        ParamSlots slots;                         // layout of the flat parameter vector (for the AD gradient)
+        ExprPar par_index;                        // ParFactory::create_index_par(): where each parameter sits in the flat vector
 
         /*
          * Gradient of the objective with respect to the flat PROB_SPACE parameter

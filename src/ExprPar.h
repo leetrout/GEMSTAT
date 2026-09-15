@@ -132,6 +132,16 @@ class ParFactory
       ParFactory( const ExprModel& in_model, int in_nSeqs);
       virtual ~ParFactory(){};
 
+      /*
+       * A parameter set of the usual shape whose values are the positions
+       * 0, 1, 2, ... of each parameter in the flat vector of getRawPars() /
+       * create_expr_par(vector).  Code that has a flat vector and needs one
+       * particular parameter looks its position up through the ordinary
+       * accessors (getBetaForSeq(), getPromoterData(), the dictionary), so the
+       * layout of the parameters stays known only to ExprPar and the model.
+       */
+      ExprPar create_index_par() const;
+
       //the raison d'etre for this class
       //virtual void set_prototype(const gsparams::DictList& in);
       virtual ExprPar create_expr_par() const;

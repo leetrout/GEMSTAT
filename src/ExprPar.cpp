@@ -296,6 +296,14 @@ ExprPar ParFactory::create_expr_par() const
   return tmp_par;
 }
 
+ExprPar ParFactory::create_index_par() const
+{
+    vector<double> flat;
+    create_expr_par().getRawPars( flat );
+    for ( size_t k = 0; k < flat.size(); k++ ) flat[k] = (double)k;
+    return create_expr_par( flat, PROB_SPACE );
+}
+
 ExprPar ParFactory::create_expr_par(const vector<double>& pars, const ThermodynamicParameterSpace in_space) const
 {
       //TODO: Most of this code can be further simplified by using the STL vector's nice functions.

@@ -229,15 +229,14 @@ void Weighted_ObjFunc_Mixin::set_weights(Matrix *in_weights){
  * Gradients (see ObjFunc::gradient in ObjFunc.h)
  ******************************************************/
 
-// the flat PROB_SPACE index of the beta that scales sequence i
-static int beta_slot_for( const ExprPar* par, const ParamSlots* slots, int i )
+// the position, in the flat parameter vector, of the beta that scales sequence i
+static int beta_slot_for( const ExprPar* par_index, int i )
 {
-    if ( NULL == par || NULL == slots || slots->beta.empty() ) return -1;
-    int use_enhancerID = par->my_factory->expr_model.shared_scaling ? 0 : i;
-    return use_enhancerID < (int)slots->beta.size() ? slots->beta[ use_enhancerID ] : -1;
+    if ( NULL == par_index ) return -1;
+    return (int)par_index->getBetaForSeq( i );
 }
 
-void ObjFunc::gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ParamSlots* slots,
+void ObjFunc::gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ExprPar* par_index,
                        vector<vector<double> >& d_prediction, vector<double>& d_pars)
 {
     // central differences: eval() is cheap compared with a prediction pass
@@ -271,7 +270,7 @@ void ObjFunc::gradient(const vector<vector<double> >& ground_truth, const vector
     }
 }
 
-void RMSEObjFunc::gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ParamSlots* slots,
+void RMSEObjFunc::gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ExprPar* par_index,
                            vector<vector<double> >& d_prediction, vector<double>& d_pars)
 {
     // rmse = sqrt( sum_ij ( beta_i p_ij - g_ij )^2 / N )
@@ -287,7 +286,7 @@ void RMSEObjFunc::gradient(const vector<vector<double> >& ground_truth, const ve
         double beta = 1.0;
         int bslot = -1;
         #ifdef BETAOPTTOGETHER
-        if ( NULL != par ) { beta = par->getBetaForSeq(i); bslot = beta_slot_for( par, slots, i ); }
+        if ( NULL != par ) { beta = par->getBetaForSeq(i); bslot = beta_slot_for( par_index, i ); }
         #else
         // the objective solves for the best beta itself; by the envelope theorem
         // the derivative with respect to the predictions is the partial at that beta
@@ -306,7 +305,7 @@ void RMSEObjFunc::gradient(const vector<vector<double> >& ground_truth, const ve
     }
 }
 
-void Weighted_RMSEObjFunc::gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ParamSlots* slots,
+void Weighted_RMSEObjFunc::gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ExprPar* par_index,
                                     vector<vector<double> >& d_prediction, vector<double>& d_pars)
 {
     // rmse = sqrt( sum_ij w_ij ( beta_i p_ij - g_ij )^2 / total_weight )
@@ -320,7 +319,7 @@ void Weighted_RMSEObjFunc::gradient(const vector<vector<double> >& ground_truth,
     {
         double beta = 1.0;
         int bslot = -1;
-        if ( NULL != par ) { beta = par->getBetaForSeq(i); bslot = beta_slot_for( par, slots, i ); }
+        if ( NULL != par ) { beta = par->getBetaForSeq(i); bslot = beta_slot_for( par_index, i ); }
         double dbeta = 0.0;
         for ( int j = 0; j < nConds; j++ )
         {
@@ -333,10 +332,10 @@ void Weighted_RMSEObjFunc::gradient(const vector<vector<double> >& ground_truth,
     }
 }
 
-void RegularizedObjFunc::gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ParamSlots* slots,
+void RegularizedObjFunc::gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ExprPar* par_index,
                                   vector<vector<double> >& d_prediction, vector<double>& d_pars)
 {
-    my_wrapped_obj_func->gradient( ground_truth, prediction, par, slots, d_prediction, d_pars );
+    my_wrapped_obj_func->gradient( ground_truth, prediction, par, par_index, d_prediction, d_pars );
 
     // penalties are on the ENERGY_SPACE values e_k = log p_k
     vector<double> flat;
@@ -349,7 +348,7 @@ void RegularizedObjFunc::gradient(const vector<vector<double> >& ground_truth, c
     }
 }
 
-void AvgCorrObjFunc::gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ParamSlots* slots,
+void AvgCorrObjFunc::gradient(const vector<vector<double> >& ground_truth, const vector<vector<double> >& prediction, const ExprPar* par, const ExprPar* par_index,
                               vector<vector<double> >& d_prediction, vector<double>& d_pars)
 {
     // objective = - mean_i corr( prediction_i, ground_truth_i ); no direct parameter dependence

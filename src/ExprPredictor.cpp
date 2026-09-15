@@ -89,7 +89,7 @@ ExprPredictor::ExprPredictor( const vector <Sequence>& _seqs, const vector< Site
 	trainingObjective = NULL;
 
 	gradient_method = GRADIENT_AD;
-	slots = ParamSlots::build( param_factory->create_expr_par(), motifNames );
+	par_index = param_factory->create_index_par();
 
 	maxShift = 5;
 	shiftPenalty = 0.8;
@@ -630,7 +630,9 @@ void ExprPredictor::gradient_prob( const ExprPar& par, vector< double >& grad ) 
     typedef gemstat_ad_t V;
     typedef gemstat_ad::Tape< gemstat_dp_t > TapeT;
 
-    const int n_pars = slots.n_pars;
+    vector< double > flat;
+    par.getRawPars( flat );
+    const int n_pars = flat.size();
     const int n = nSeqs();
     const int nc = nConds();
 
@@ -640,11 +642,7 @@ void ExprPredictor::gradient_prob( const ExprPar& par, vector< double >& grad ) 
     this->predict_all( par, predictions );
     vector< vector< double > > d_pred;
     vector< double > d_pars( n_pars, 0.0 );
-    trainingObjective->gradient( ground_truths, predictions, &par, &slots, d_pred, d_pars );
-
-    vector< double > flat;
-    par.getRawPars( flat );
-    if ( (int)flat.size() != n_pars ) throw std::logic_error( "ExprPredictor::gradient_prob: parameter layout changed" );
+    trainingObjective->gradient( ground_truths, predictions, &par, &par_index, d_pred, d_pars );
 
     // zero-weighted bins are not predicted during training (see predict())
     Matrix* weights = NULL;
@@ -674,7 +672,7 @@ void ExprPredictor::gradient_prob( const ExprPar& par, vector< double >& grad ) 
                 for ( int k = 0; k < n_pars; k++ ) vars[k] = V::input( flat[k] );
 
                 ExprFunc* func = createExprFunc( par, seqSites[i], seqLengths[i], i );
-                ThermoVals< V > vals = func->makeVals( vars, slots );
+                ThermoVals< V > vals = func->makeVals( vars, par_index );
                 vector< int > out_index( nc, -1 );
                 for ( int j = 0; j < nc; j++ )
                 {
@@ -733,10 +731,12 @@ bool ExprPredictor::checkGradient( const ExprPar& par_init, ostream& os, double 
     }
 
     // names of the free parameters, for the report
-    vector< std::string > paths;
-    ParamSlots::flatten_paths( par_model.my_pars, "", paths );
     vector< std::string > free_names;
-    for ( size_t k = 0; k < paths.size(); k++ ) if ( indicator_bool[k] ) free_names.push_back( paths[k] );
+    {
+        size_t k = 0;
+        for ( gsparams::DictList::iterator itr = par_model.my_pars.begin(); itr != par_model.my_pars.end(); ++itr, ++k )
+            if ( indicator_bool[k] ) free_names.push_back( itr.get_path() );
+    }
 
     bool ok = true;
     double worst = 0.0;

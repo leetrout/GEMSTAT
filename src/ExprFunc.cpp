@@ -10,73 +10,6 @@
 //#define DEBUG
 
 /*****************************************************
- * ParamSlots
- ******************************************************/
-
-void ParamSlots::flatten_paths( const gsparams::DictList& d, const std::string& prefix, vector< std::string >& out )
-{
-    if ( d.my_type == gsparams::undecided ) return;
-    if ( d.my_type == gsparams::primitive ) { out.push_back( prefix ); return; }
-    int n = d.list_storage.size();
-    for ( int i = 0; i < n; i++ )
-    {
-        std::string key;
-        if ( d.my_type == gsparams::dict ) key = d.map_key_storage.at(i);
-        else { std::ostringstream ss; ss << i; key = ss.str(); }
-        flatten_paths( d.list_storage.at(i), prefix.empty() ? key : prefix + "/" + key, out );
-    }
-}
-
-ParamSlots ParamSlots::build( const ExprPar& par, const vector< string >& motifNames )
-{
-    vector< std::string > paths;
-    flatten_paths( par.my_pars, "", paths );
-    std::map< std::string, int > index;
-    for ( size_t i = 0; i < paths.size(); i++ ) index[ paths[i] ] = (int)i;
-    struct Find {
-        const std::map< std::string, int >& index;
-        int operator()( const std::string& p ) const { std::map< std::string, int >::const_iterator it = index.find( p ); return it == index.end() ? -1 : it->second; }
-    } find = { index };
-
-    ParamSlots s;
-    s.n_pars = paths.size();
-    int nF = motifNames.size();
-    s.maxbind.resize( nF ); s.alpha_a.resize( nF ); s.alpha_r.resize( nF );
-    for ( int f = 0; f < nF; f++ )
-    {
-        s.maxbind[f] = find( "tfs/" + motifNames[f] + "/maxbind" );
-        s.alpha_a[f] = find( "tfs/" + motifNames[f] + "/alpha_a" );
-        s.alpha_r[f] = find( "tfs/" + motifNames[f] + "/alpha_r" );
-    }
-    s.inter.assign( nF, vector< int >( nF, -1 ) );
-    for ( int a = 0; a < nF; a++ )
-    {
-        for ( int b = a; b < nF; b++ )
-        {
-            int slot = find( "inter/" + motifNames[a] + ":" + motifNames[b] );
-            if ( slot < 0 ) slot = find( "inter/" + motifNames[b] + ":" + motifNames[a] );
-            s.inter[a][b] = s.inter[b][a] = slot;
-        }
-    }
-    for ( int k = 0; ; k++ )
-    {
-        std::ostringstream ss; ss << "qbtm/" << k;
-        int slot = find( ss.str() );
-        if ( slot < 0 ) break;
-        s.qbtm.push_back( slot );
-    }
-    for ( int k = 0; ; k++ )
-    {
-        std::ostringstream ss; ss << "enh/" << k;
-        int beta = find( ss.str() + "/beta" );
-        if ( beta < 0 ) break;
-        s.beta.push_back( beta );
-        s.pi.push_back( find( ss.str() + "/pi" ) );
-    }
-    return s;
-}
-
-/*****************************************************
  * ExprFunc
  ******************************************************/
 
@@ -197,7 +130,7 @@ void ExprFunc::fillPlainWeights()
     }
 }
 
-ThermoVals< gemstat_ad_t > ExprFunc::makeVals( const vector< gemstat_ad_t >& flat, const ParamSlots& slots ) const
+ThermoVals< gemstat_ad_t > ExprFunc::makeVals( const vector< gemstat_ad_t >& flat, const ExprPar& par_index ) const
 {
     typedef gemstat_ad_t V;
     // The Logistic model works on ENERGY_SPACE parameters (see
@@ -205,21 +138,39 @@ ThermoVals< gemstat_ad_t > ExprFunc::makeVals( const vector< gemstat_ad_t >& fla
     const bool energy = ( expr_model->modelOption == LOGISTIC );
     struct Get {
         const vector< V >& flat; bool energy;
-        V operator()( int slot, double dflt ) const
+        V operator()( double index ) const
         {
-            if ( slot < 0 ) return V( (gemstat_dp_t)dflt );
+            int slot = (int)index;
+            if ( slot < 0 || slot >= (int)flat.size() ) throw std::logic_error( "ExprFunc::makeVals: parameter index out of range" );
             return energy ? log( flat[slot] ) : flat[slot];
         }
     } get = { flat, energy };
 
+    // the same lookups as the constructor, on the index parameter set
+    gsparams::DictList& idx = (gsparams::DictList&)par_index.my_pars;
     ThermoVals< V > v;
     int nF = motifs.size();
     v.maxBindingWts.resize( nF ); v.txpEffects.resize( nF ); v.repEffects.resize( nF );
     for ( int f = 0; f < nF; f++ )
     {
-        v.maxBindingWts[f] = get( slots.maxbind[f], 1.0 );
-        v.txpEffects[f] = get( slots.alpha_a[f], 1.0 );
-        v.repEffects[f] = get( slots.alpha_r[f], 1.0 );
+        const std::string& which_tf = expr_model->motifnames.at(f);
+        v.maxBindingWts[f] = get( idx["tfs"][which_tf]["maxbind"] );
+        v.txpEffects[f] = get( idx["tfs"][which_tf]["alpha_a"] );
+        v.repEffects[f] = get( idx["tfs"][which_tf]["alpha_r"] );
+    }
+
+    // interactions: the constant 1 for pairs without a parameter (as factorIntMat is initialised)
+    std::map< std::string, int > tf_names_to_ids;
+    for ( int i = 0; i < (int)expr_model->motifnames.size(); i++ ) tf_names_to_ids[ expr_model->motifnames.at(i) ] = i;
+    vector< vector< V > > normalInt( nF, vector< V >( nF, V( (gemstat_dp_t)1.0 ) ) );
+    for ( int k = 0; k < idx["inter"].size(); k++ )
+    {
+        std::string key = idx["inter"].map_key_storage.at(k);
+        double index = idx["inter"].list_storage.at(k);
+        int split_pos = key.find(":");
+        int a = tf_names_to_ids[ key.substr( 0, split_pos ) ];
+        int b = tf_names_to_ids[ key.substr( split_pos + 1, key.size() ) ];
+        normalInt[a][b] = normalInt[b][a] = get( index );
     }
 
     v.w_ij.assign( left_nbrs.size(), vector< V >() );
@@ -231,9 +182,9 @@ ThermoVals< gemstat_ad_t > ExprFunc::makeVals( const vector< gemstat_ad_t >& fla
         for ( size_t k = 0; k < left_nbrs[i].size(); k++ )
         {
             int j = left_nbrs[i][k].j;
-            V normalInt = get( slots.inter[ sites[i].factorIdx ][ sites[j].factorIdx ], 1.0 );
-            v.w_ij[i][k] = factorIntAffine( sites[i], sites[j], normalInt );
-            v.w_ji[i][k] = factorIntAffine( sites[j], sites[i], normalInt );
+            const V& n_int = normalInt[ sites[i].factorIdx ][ sites[j].factorIdx ];
+            v.w_ij[i][k] = factorIntAffine( sites[i], sites[j], n_int );
+            v.w_ji[i][k] = factorIntAffine( sites[j], sites[i], n_int );
         }
     }
     v.all_w_ji.assign( all_left_nbrs.size(), vector< V >() );
@@ -243,8 +194,7 @@ ThermoVals< gemstat_ad_t > ExprFunc::makeVals( const vector< gemstat_ad_t >& fla
         for ( size_t k = 0; k < all_left_nbrs[i].size(); k++ )
         {
             int j = all_left_nbrs[i][k].j;
-            V normalInt = get( slots.inter[ sites[i].factorIdx ][ sites[j].factorIdx ], 1.0 );
-            v.all_w_ji[i][k] = factorIntAffine( sites[j], sites[i], normalInt );
+            v.all_w_ji[i][k] = factorIntAffine( sites[j], sites[i], normalInt[ sites[i].factorIdx ][ sites[j].factorIdx ] );
         }
     }
     v.right_w_ij.assign( right_nbrs.size(), vector< V >() );
@@ -254,16 +204,12 @@ ThermoVals< gemstat_ad_t > ExprFunc::makeVals( const vector< gemstat_ad_t >& fla
         for ( size_t k = 0; k < right_nbrs[i].size(); k++ )
         {
             int j = right_nbrs[i][k].j;
-            V normalInt = get( slots.inter[ sites[i].factorIdx ][ sites[j].factorIdx ], 1.0 );
-            v.right_w_ij[i][k] = factorIntAffine( sites[i], sites[j], normalInt );
+            v.right_w_ij[i][k] = factorIntAffine( sites[i], sites[j], normalInt[ sites[i].factorIdx ][ sites[j].factorIdx ] );
         }
     }
 
-    // basal transcription slot, as ExprPar::getPromoterData() picks it
-    int use_enhancerID = expr_model->shared_scaling ? 0 : seq_number;
-    int use_basal = expr_model->one_qbtm_per_crm ? use_enhancerID : 0;
-    if ( use_basal >= (int)slots.qbtm.size() ) throw std::logic_error( "ExprFunc::makeVals: no qbtm slot for this sequence" );
-    v.basal = get( slots.qbtm[ use_basal ], 1.0 );
+    // basal transcription, through ExprPar's own choice of slot for this sequence
+    v.basal = get( par_index.getPromoterData( seq_number ).basal_trans );
     return v;
 }
 

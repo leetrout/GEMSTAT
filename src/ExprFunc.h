@@ -6,7 +6,6 @@
 #include "ExprPar.h"
 #include "DataSet.h"
 #include "tools/ReverseAD.h"
-#include "ParamSlots.h"
 
 /*****************************************************
  * Expression Model and Parameters
@@ -56,12 +55,16 @@ class ExprFunc
 
         /*
          * Differentiable prediction.  flat_pars are the PROB_SPACE parameters of
-         * this sequence's ExprPar as gemstat_ad_t inputs of the active tape (see
-         * ParamSlots); the returned value is recorded on that tape.  makeVals()
-         * derives the per-sequence quantities once; predictExprAD() is then
-         * called per condition.
+         * this sequence's ExprPar, in the flat (traversal) order of
+         * ExprPar::getRawPars(), as gemstat_ad_t inputs of the active tape;
+         * par_index is a parameter set of the same shape whose values are the
+         * flat indices 0, 1, 2, ... (see ParFactory::create_index_par()), so the
+         * parameters are looked up by name exactly as the constructor does.
+         * The returned value is recorded on the tape.  makeVals() derives the
+         * per-sequence quantities once; predictExprAD() is then called per
+         * condition.
          */
-        ThermoVals< gemstat_ad_t > makeVals( const vector< gemstat_ad_t >& flat_pars, const ParamSlots& slots ) const;
+        ThermoVals< gemstat_ad_t > makeVals( const vector< gemstat_ad_t >& flat_pars, const ExprPar& par_index ) const;
         virtual gemstat_ad_t predictExprAD( ThermoVals< gemstat_ad_t >& vals, const vector< double >& factorConcs ) const;
 
         //static ModelType modelOption;             // model option
