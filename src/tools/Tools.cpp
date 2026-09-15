@@ -1392,8 +1392,12 @@ vector< double > inverse_weight_transform( const vector< double > u )
 
 void numeric_deriv( gsl_vector* grad, double (*f)( const gsl_vector*, void* ), const gsl_vector* v, void* params, double step )
 {
+    numeric_deriv( grad, f, v, params, step, (*f)( v, params ) );
+}
+
+void numeric_deriv( gsl_vector* grad, double (*f)( const gsl_vector*, void* ), const gsl_vector* v, void* params, double step, double f_val )
+{
     int n = v->size;
-    double f_val = (*f)( v, params );
 
     gsl_vector* dv = gsl_vector_alloc( n );
     for ( int i = 0; i < n; i++ )

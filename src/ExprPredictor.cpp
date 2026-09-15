@@ -521,7 +521,7 @@ double nlopt_obj_func( const vector<double> &x, vector<double> &grad, void* f_da
         if(!grad.empty()){
                 gsl_vector *dxv = vector2gsl(grad);
 
-                gsl_obj_df(xv,f_data,dxv);
+                gsl_obj_df(xv,f_data,dxv,objective); // objective is f(x): don't evaluate it a second time
 
                 for(int i = 0;i< grad.size();i++){
                         grad[i] = dxv->data[i];
@@ -560,8 +560,13 @@ double gsl_obj_f( const gsl_vector* v, void* params )
 
 void gsl_obj_df( const gsl_vector* v, void* params, gsl_vector* grad )
 {
+    gsl_obj_df( v, params, grad, gsl_obj_f( v, params ) );
+}
+
+void gsl_obj_df( const gsl_vector* v, void* params, gsl_vector* grad, double f_val )
+{
     double step = 1.0E-6;
-    numeric_deriv( grad, gsl_obj_f, v, params, step );
+    numeric_deriv( grad, gsl_obj_f, v, params, step, f_val );
 }
 
 

@@ -268,6 +268,8 @@ vector< double > inverse_weight_transform( const vector< double > u );
 
 // finite difference method of gradient of a function
 void numeric_deriv( gsl_vector* grad, double (*f)( const gsl_vector*, void* ), const gsl_vector* v, void* params, double step );
+// Same, when f(v) is already known: saves one evaluation of f per gradient.
+void numeric_deriv( gsl_vector* grad, double (*f)( const gsl_vector*, void* ), const gsl_vector* v, void* params, double step, double f_val );
 
 // sum
 template< class T >
