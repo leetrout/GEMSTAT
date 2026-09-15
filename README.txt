@@ -52,6 +52,8 @@ Explanation of parameters:
 
 -rt <repressionDistThr>: the distance threshold of short range repression. Default = 150 bp. 
 
+--random_starts <N>: after training from the initial parameters, train again from N random starting points (drawn with --seed) and keep the best result. Default 0. This happens inside one process: the inputs are read and annotated once.
+
 --seed <RNG_SEED>: seed of the random number generator (used for random restarts). Runs with the same inputs and seed are reproducible. Default: the current time.
 
 --threads <N>: number of threads used to predict sequences in parallel inside every objective evaluation (needs a build with OpenMP, which is the default when the compiler supports it). Default: all cores, or the OMP_NUM_THREADS environment variable. Results do not depend on the number of threads.

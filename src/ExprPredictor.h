@@ -60,16 +60,18 @@ class ExprPredictor : public TrainingAware
 
         // the similarity between two expression patterns, using cross-correlation
         static double exprSimCrossCorr( const vector< double >& x, const vector< double >& y );
-        static int maxShift;                      // maximum shift when computing cross correlation
-        static double shiftPenalty;               // the penalty for shift (when weighting different positions)
+        int maxShift;                             // maximum shift when computing cross correlation (default 5)
+        double shiftPenalty;                      // the penalty for shift (when weighting different positions; default 0.8)
 
         // the parameters for the optimizer
         int n_alternations;                 // number of alternations (between two optimization methods)
         int n_random_starts;                   // number of random starts
-        static double min_delta_f_SSE;            // the minimum change of the objective function under SSE
-        static double min_delta_f_Corr;           // the minimum change of the objective function under correlation
-        static double min_delta_f_CrossCorr;      // the minimum change of the objective function under cross correlation
-        static double min_delta_f_PGP;            // the minimum change of the objective function under PGP
+        // stopping tolerance (absolute change of the objective) of the gradient
+        // optimizer, per objective type. Defaults 1e-8; seq2expr sets 1e-10.
+        double min_delta_f_SSE;                   // the minimum change of the objective function under SSE
+        double min_delta_f_Corr;                  // the minimum change of the objective function under correlation
+        double min_delta_f_CrossCorr;             // the minimum change of the objective function under cross correlation
+        double min_delta_f_PGP;                   // the minimum change of the objective function under PGP
         int max_simplex_iterations;               // maximum number of iterations for Simplex optimizer (default = 200)
         int max_gradient_iterations;              // maximum number of iterations for Gradient optimizer (default = 50)
         vector < bool > indicator_bool;

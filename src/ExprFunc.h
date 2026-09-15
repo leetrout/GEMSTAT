@@ -32,7 +32,6 @@ class ExprFunc
         const ExprPar& getPar() const { return par; }
 
         //static ModelType modelOption;             // model option
-        static bool one_qbtm_per_crm;
     protected:
         //setup functions that may be useful to subclasses
         virtual void setupSitesAndBoundaries(const SiteVec& _sites, int length, int seq_num);

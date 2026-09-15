@@ -87,6 +87,14 @@ ExprPredictor::ExprPredictor( const vector <Sequence>& _seqs, const vector< Site
     param_factory = new ParFactory(expr_model, nSeqs());
 
 	trainingObjective = NULL;
+
+	maxShift = 5;
+	shiftPenalty = 0.8;
+	min_delta_f_SSE = 1.0E-8;
+	min_delta_f_Corr = 1.0E-8;
+	min_delta_f_CrossCorr = 1.0E-8;
+	min_delta_f_PGP = 1.0E-8;
+
 	set_objective_option(objOption);
 
     /* DEBUG
@@ -125,7 +133,7 @@ void ExprPredictor::set_objective_option( ObjType in_obj_option ){
         trainingObjective = new PGPObjFunc();
         break;
       case CROSS_CORR:
-        trainingObjective = new AvgCrossCorrObjFunc(ExprPredictor::maxShift, ExprPredictor::shiftPenalty);
+        trainingObjective = new AvgCrossCorrObjFunc(maxShift, shiftPenalty);
         break;
       case LOGISTIC_REGRESSION:
         trainingObjective = new LogisticRegressionObjFunc();
@@ -365,13 +373,6 @@ int ExprPredictor::predict_all( const ExprPar& par , vector< vector< double > > 
 	return 0;
 }
 
-int ExprPredictor::maxShift = 5;
-double ExprPredictor::shiftPenalty = 0.8;
-
-double ExprPredictor::min_delta_f_SSE = 1.0E-8;
-double ExprPredictor::min_delta_f_Corr = 1.0E-8;
-double ExprPredictor::min_delta_f_CrossCorr = 1.0E-8;
-double ExprPredictor::min_delta_f_PGP = 1.0E-8;
 
 
 
@@ -453,6 +454,7 @@ int ExprPredictor::simplex_minimize( ExprPar& par_result, double& obj_result )
     par_result = param_factory->changeSpace(tmp_par_model, PROB_SPACE);
 
     printPar( par_result );
+    cout << endl;
 
     return 0;
 }

@@ -83,9 +83,6 @@ int main( int argc, char* argv[] )
 
     int cmdline_n_alternations = 5;
     int cmdline_n_random_starts = 0;
-    ExprPredictor::min_delta_f_SSE = 1.0E-10;
-    ExprPredictor::min_delta_f_Corr = 1.0E-10;
-    ExprPredictor::min_delta_f_CrossCorr = 1.0E-10;
     int cmdline_max_simplex_iterations = 400;
     int cmdline_max_gradient_iterations = 50;
     for ( int i = 1; i < argc; i++ )
@@ -147,6 +144,8 @@ int main( int argc, char* argv[] )
             factor_thr_file = argv[ ++i ];
 	else if ( !strcmp( "--seed", argv[ i ]))
 	    initialSeed = atol( argv[++i] );
+	else if ( !strcmp( "--random_starts", argv[ i ]))
+	    cmdline_n_random_starts = atoi( argv[++i] );
 	else if ( !strcmp( "--threads", argv[ i ]))
 	{
 	    int n_threads = atoi( argv[++i] );
@@ -178,7 +177,7 @@ int main( int argc, char* argv[] )
 
     if ( seqFile.empty() || exprFile.empty() || motifFile.empty() || factorExprFile.empty() || outFile.empty() || ( ( cmdline_modelOption == QUENCHING || cmdline_modelOption == CHRMOD_UNLIMITED || cmdline_modelOption == CHRMOD_LIMITED ) &&  factorInfoFile.empty() ) || ( cmdline_modelOption == QUENCHING && repressionFile.empty() ) )
     {
-        cerr << "Usage: " << argv[ 0 ] << " -s seqFile -e exprFile -m motifFile -f factorExprFile -fo outFile [-a annFile -o modelOption -c coopFile -i factorInfoFile -r repressionFile -oo objOption -mc maxContact -p parFile -rt repressionDistThr -na nAlternations -ct coopDistThr -sigma factorIntSigma --seed RNG_SEED --threads N]" << endl;
+        cerr << "Usage: " << argv[ 0 ] << " -s seqFile -e exprFile -m motifFile -f factorExprFile -fo outFile [-a annFile -o modelOption -c coopFile -i factorInfoFile -r repressionFile -oo objOption -mc maxContact -p parFile -rt repressionDistThr -na nAlternations -ct coopDistThr -sigma factorIntSigma --seed RNG_SEED --random_starts N --threads N]" << endl;
         cerr << "modelOption: Logistic, Direct, Quenching, ChrMod_Unlimited, ChrMod_Limited" << endl;
         exit( 1 );
     }
@@ -621,6 +620,9 @@ int main( int argc, char* argv[] )
     predictor->set_objective_option(cmdline_obj_option);
     predictor->n_alternations = cmdline_n_alternations;
     predictor->n_random_starts = cmdline_n_random_starts;
+    predictor->min_delta_f_SSE = 1.0E-10;
+    predictor->min_delta_f_Corr = 1.0E-10;
+    predictor->min_delta_f_CrossCorr = 1.0E-10;
     predictor->max_simplex_iterations = cmdline_max_simplex_iterations;
     predictor->max_gradient_iterations = cmdline_max_gradient_iterations;
 
