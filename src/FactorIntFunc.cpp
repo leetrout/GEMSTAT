@@ -54,7 +54,7 @@ double FactorIntFuncGeometric::compFactorInt( double normalInt, double dist, boo
     return spacingTerm * orientationTerm;
 }
 
-double FactorIntFuncHelical::compFactorInt( double normalInt, double dist, bool a_strand, bool b_strand ) const
+double Helical_FactorIntFunc::compFactorInt( double normalInt, double dist, bool a_strand, bool b_strand ) const
 {
     assert( dist >= 0 );
 	//bool orientation = ( a_strand == b_strand );
@@ -63,6 +63,7 @@ double FactorIntFuncHelical::compFactorInt( double normalInt, double dist, bool 
 	if(dist >= distThr) return 1.0;
 	double coeff = M_PI*32.7/180.0;
 	if(dist <= 5.0) return 1.0;
+	dist += distance_offset;
 
 	double phasing = 0.5*(cos(coeff * dist) + 1.0)*(spacingTerm - 1.0) + 1.0;
 
@@ -121,12 +122,13 @@ void FactorIntFuncGeometric::affineForm( double dist, bool a_strand, bool b_stra
     post = orientation ? 1.0 : orientationEffect;
 }
 
-void FactorIntFuncHelical::affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const
+void Helical_FactorIntFunc::affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const
 {
     assert( dist >= 0 );
     clamp_to_one = false;
     post = 1.0;
     if ( dist >= distThr || dist <= 5.0 ) { scale = 0.0; offset = 1.0; return; }
+    dist += distance_offset;
     double coeff = M_PI*32.7/180.0;
     double c = 0.5*(cos(coeff * dist) + 1.0);
     scale = c;
@@ -149,4 +151,18 @@ void HalfDirectional_FactorIntFunc::affineForm( double dist, bool a_strand, bool
     post = 1.0;
     if( ( enforce_a && (a_strand != expected_a_strand) ) || (enforce_b && (b_strand != expected_b_strand)) || (dist > distThr) ){ scale = 0.0; offset = 1.0; return; }
     scale = 1.0; offset = 0.0;
+}
+
+void HelicalDirectional_FactorIntFunc::affineForm( double dist, bool a_strand, bool b_strand, double& scale, double& offset, bool& clamp_to_one, double& post ) const
+{
+    assert( dist >= 0 );
+    if( ( enforce_a && (a_strand != expected_a_strand) ) || (enforce_b && (b_strand != expected_b_strand)) || (dist > distThr) ){ scale = 0.0; offset = 1.0; clamp_to_one = false; post = 1.0; return; }
+    Helical_FactorIntFunc::affineForm( dist, a_strand, b_strand, scale, offset, clamp_to_one, post );
+}
+
+double HelicalDirectional_FactorIntFunc::compFactorInt( double normalInt, double dist, bool a_strand, bool b_strand ) const
+{
+    assert( dist >= 0 );
+	if( ( enforce_a && (a_strand != expected_a_strand) ) || (enforce_b && (b_strand != expected_b_strand)) || (dist > distThr) ){ return 1.0; }
+	return Helical_FactorIntFunc::compFactorInt( normalInt, dist, a_strand, b_strand );
 }

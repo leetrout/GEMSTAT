@@ -8,8 +8,18 @@
 #include "tools/ReverseAD.h"
 
 /*****************************************************
- * Expression Model and Parameters
- ******************************************************/
+* Expression Model and Parameters
+******************************************************/
+
+
+//It is a precondition that site_a.start <= site_b.start
+#define ORDERED_SITE_OVERLAP(site_a, site_b) site_a.end < site_b.start
+
+//The distance between two sites is the gap between them (the number of base
+//pairs from the end of the earlier site to the start of the later one).
+//It is a precondition that the sites do not overlap, and that site_b comes after site_a
+#define SITE_DISTANCE(site_a, site_b) site_b.start - site_a.end
+
 
 typedef long double gemstat_dp_t;
 typedef gemstat_ad::Var< gemstat_dp_t > gemstat_ad_t;   // the same computations, recorded for reverse-mode differentiation
@@ -27,11 +37,11 @@ struct ThermoVals
     vector< T > txpEffects;             // per factor: alpha (activation)
     vector< T > repEffects;             // per factor: beta (repression) under ChrMod, quenching efficiency etc.
     vector< T > bindingWts;             // per site incl. pseudo-sites; depends on the condition
-    vector< vector< T > > w_ij;         // per ExprFunc::left_nbrs[i][k]: interaction( sites[i], sites[j] )
-    vector< vector< T > > w_ji;         // per ExprFunc::left_nbrs[i][k]: interaction( sites[j], sites[i] )
-    vector< vector< T > > all_w_ji;     // per ExprFunc::all_left_nbrs[i][k] (Quenching on-state)
-    vector< vector< T > > right_w_ij;   // per ExprFunc::right_nbrs[i][k] (Markov backward pass)
+    vector< vector< T > > w;            // per ExprFunc::left_nbrs[i][k]: interaction( earlier site j, later site i )
+    vector< vector< T > > all_w;        // per ExprFunc::all_left_nbrs[i][k] (Quenching on-state)
+    vector< vector< T > > right_w;      // per ExprFunc::right_nbrs[i][k]: interaction( earlier site i, later site j ) (Markov backward pass)
     T basal;                            // q_btm for this sequence
+    T pi;                               // the "pi" promoter parameter (the second arc's q_btm under the Rates model)
 };
 
 /* ExprFunc class: predict the expression (promoter occupancy) of an enhancer sequence */
@@ -70,6 +80,7 @@ class ExprFunc
         //static ModelType modelOption;             // model option
     protected:
         //setup functions that may be useful to subclasses
+        double interactionRange() const;
         virtual void setupSitesAndBoundaries(const SiteVec& _sites, int length, int seq_num);
         void setupBindingWeights(const vector< double >& factorConcs);
         // TF binding motifs
@@ -106,14 +117,15 @@ class ExprFunc
          * condition even though it only changes with the parameters.  Lists keep
          * the iteration order of the original loops so results are bit-identical.
          */
+    public:
         struct SiteInteraction {
             int j;          // index of the other site
-            int dist;       // |sites[i].start - sites[j].start|
-            double w_ij;    // compFactorInt( sites[i], sites[j] )
-            double w_ji;    // compFactorInt( sites[j], sites[i] )
+            int dist;       // the gap between the two sites (SITE_DISTANCE of the earlier and the later one)
+            double w;       // compFactorInt( earlier site, later site )
             bool rep_ij;    // testRepression( sites[i], sites[j] )
             bool rep_ji;    // testRepression( sites[j], sites[i] )
         };
+    protected:
         vector< vector< SiteInteraction > > left_nbrs;      // left_nbrs[i]: sites j in (boundaries[i], i), increasing j
         vector< vector< SiteInteraction > > all_left_nbrs;  // every non-overlapping site j < i (Quenching on-state; empty otherwise)
         vector< vector< SiteInteraction > > right_nbrs;     // sites j > i in decreasing j (Markov backward pass; empty otherwise)

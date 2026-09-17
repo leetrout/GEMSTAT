@@ -3,14 +3,17 @@
 
 
 
-#include "ExprPredictor.h"
-#include "ExprModel.h"
-
 #include <iostream>
 #include <string>
 #include <sstream>
 #include <algorithm>
 #include <iterator>
+
+#include "ExprPredictor.h"
+#include "ExprModel.h"
+
+#include "ExprFunc.h"
+#include "ExprFunc_rates.h"
 
 ExprModel::ExprModel( ModelType _modelOption, bool _one_qbtm_per_crm, vector< Motif>& _motifs, vector< string>& _motif_names, int _maxContact, vector< bool >& _actIndicators, vector< bool>& _repIndicators, IntMatrix& _repressionMat, double _repressionDistThr ) : modelOption( _modelOption), one_qbtm_per_crm( _one_qbtm_per_crm), motifs( _motifs), motifnames(_motif_names), maxContact( _maxContact), actIndicators( _actIndicators), repIndicators( _repIndicators), repressionMat( _repressionMat), repressionDistThr( _repressionDistThr)
 {
@@ -37,12 +40,9 @@ ModelType getModelOption( const string& modelOptionStr )
     if ( toupperStr( modelOptionStr ) == "CHRMOD_UNLIMITED" ) return CHRMOD_UNLIMITED;
     if ( toupperStr( modelOptionStr ) == "CHRMOD_LIMITED" ) return CHRMOD_LIMITED;
     if ( toupperStr( modelOptionStr ) == "MARKOV" ) return MARKOV;
-    if ( toupperStr( modelOptionStr ) == "RATES" ){
-        cerr << "The Rates model is not implemented in this version." << endl;
-        exit(1);
-    }
+    if ( toupperStr( modelOptionStr ) == "RATES" ) return RATES;
 
-    cerr << "'" << modelOptionStr << "' is not a valid model option (Logistic, Direct, Quenching, ChrMod_Unlimited, ChrMod_Limited, Markov)." << endl;
+    cerr << "'" << modelOptionStr << "' is not a valid model option (Logistic, Direct, Quenching, ChrMod_Unlimited, ChrMod_Limited, Markov, Rates)." << endl;
     exit(1);
 }
 
@@ -85,7 +85,11 @@ ExprFunc* ExprModel::createNewExprFunc( const ExprPar& par, const SiteVec& sites
         parToPass = par.my_factory->changeSpace(par, PROB_SPACE );
         return_exprfunc = new ChrModUnlimited_ExprFunc(this, parToPass, sites_,seq_length,seq_num);
         break;
-    case MARKOV:
+    case RATES :
+        parToPass = par.my_factory->changeSpace(par, PROB_SPACE );
+        return_exprfunc = new Rates_ExprFunc(this, parToPass, sites_,seq_length,seq_num);
+        break;
+    case MARKOV :
         parToPass = par.my_factory->changeSpace(par, PROB_SPACE );
         return_exprfunc = new Markov_ExprFunc(this, parToPass, sites_,seq_length,seq_num);
         break;
@@ -102,7 +106,7 @@ CoopInfo::CoopInfo(int n_motifs) : coop_matrix( n_motifs, n_motifs, false)
     num_coops = 0;
     int_funcs.clear();
     int_funcs.push_back(new Null_FactorIntFunc()); //Interaction between sites not otherwise listed.
-    int_funcs.push_back(new FactorIntFuncBinary( 20 ));
+    int_funcs.push_back(new FactorIntFuncBinary( 20 ));//Will get overridden later in program execution, don't worry.
 
 
 }
@@ -170,6 +174,18 @@ void CoopInfo::read_coop_file(string filename, map<string, int> factorIdxMap){
                         assert(false); //Sorry, not implemented
                     }
 
+					if(0 == tokens[2].compare("SIMPLE")){
+                        assert(tokens.size() >= 4);
+                        //setup a dimer interaction
+
+                        int dist_thr = atoi(tokens[3].c_str());
+
+                        int_funcs.push_back(new FactorIntFuncBinary(dist_thr));
+                        forward_func = int_funcs.size()-1;
+                        backward_func = int_funcs.size()-1;
+                        interaction_setup_done = true;
+                    }//END DIMER PARSING
+
                     if(0 == tokens[2].compare("DIMER")){
                         assert(tokens.size() >= 6);
                         //setup a dimer interaction
@@ -225,7 +241,7 @@ void CoopInfo::read_coop_file(string filename, map<string, int> factorIdxMap){
                             first_orientation = false;
                             first_cares = true;
                         }else{
-                            throw std::runtime_error("There was invalid input when reading the coop file. (HALF_DIR)");
+                            throw std::runtime_error("There was invalid input when reading the coop file. (HALF_DIRECTIONAL)");
                         }
 
                         //direction for second subunit
@@ -238,11 +254,11 @@ void CoopInfo::read_coop_file(string filename, map<string, int> factorIdxMap){
                             second_orientation = false;
                             second_cares = true;
                         }else{
-                            throw std::runtime_error("There was invalid input when reading the coop file. (HALF_DIR)");
+                            throw std::runtime_error("There was invalid input when reading the coop file. (HALF_DIRECTIONAL)");
                         }
 
                         if( !first_cares && !second_cares){
-                            throw std::runtime_error("At least one subunit should care about its direction. (HALF_DIR)");
+                            throw std::runtime_error("At least one subunit should care about its direction. (HALF_DIRECTIONAL)");
                         }
 
                         int_funcs.push_back(new HalfDirectional_FactorIntFunc(dist_thr, first_orientation, second_orientation, first_cares, second_cares));
@@ -255,7 +271,69 @@ void CoopInfo::read_coop_file(string filename, map<string, int> factorIdxMap){
 
 
                         interaction_setup_done = true;
-                    }//END DIMER PARSING
+                    }//END HALF_DIRECTIONAL PARSING
+
+					//HALF DIRECTION, should really be handled by changing the line for dimer, but, blah.
+                    if(0 == tokens[2].compare("HELICAL_DIRECTIONAL")){
+                        assert(tokens.size() >= 7);
+                        //setup a dimer interaction
+
+                        int dist_thr = atoi(tokens[3].c_str());
+                        bool first_orientation = 0;
+                        bool first_cares = false;
+                        bool second_orientation = 0;
+                        bool second_cares = false;
+
+						double dist_offset = atof(tokens[4].c_str());
+
+                        //direction for first subunit
+						const std::string& first_dir_tok = tokens[5];
+						const std::string& second_dir_tok = tokens[6];
+                        if((0 == first_dir_tok.compare("1") )|| (0 == first_dir_tok.compare("+")) ){
+                            first_orientation = true;
+                            first_cares = true;
+                        }else if( (0 == first_dir_tok.compare("?")) || (0 == first_dir_tok.compare("*")) ){
+                            first_cares = false;
+                        }else if( (0 == first_dir_tok.compare("0")) || (0 == first_dir_tok.compare("-")) ){
+                            first_orientation = false;
+                            first_cares = true;
+                        }else{
+                            throw std::runtime_error("There was invalid input when reading the coop file. (HELICAL_DIRECTIONAL)");
+                        }
+
+                        //direction for second subunit
+                        if((0 == second_dir_tok.compare("1") )|| (0 == second_dir_tok.compare("+")) ){
+                            second_orientation = true;
+                            second_cares = true;
+                        }else if( (0 == second_dir_tok.compare("?")) || (0 == second_dir_tok.compare("*")) ){
+                            second_cares = false;
+                        }else if( (0 == second_dir_tok.compare("0")) || (0 == second_dir_tok.compare("-")) ){
+                            second_orientation = false;
+                            second_cares = true;
+                        }else{
+                            throw std::runtime_error("There was invalid input when reading the coop file. (HELICAL_DIRECTIONAL)");
+                        }
+
+						if( tf_i == tf_j && (
+							(first_cares != second_cares)
+							|| (first_cares && second_cares && (first_orientation == second_orientation) ) ) ){
+							throw std::runtime_error("When using direction dependent helical self-interactions,"
+							" either the subunits must neither care about the direction, or they must be opposites.");
+						}
+
+                        int_funcs.push_back(new HelicalDirectional_FactorIntFunc(dist_thr, dist_offset, first_orientation, second_orientation, first_cares, second_cares));
+                        forward_func = int_funcs.size()-1;
+						backward_func = forward_func;
+
+                        //excluding self interactions was already handled at the beginning of the block.
+                        //NON-Homodimers need an additional function.
+						if( tf_i != tf_j){
+                        	int_funcs.push_back(new HelicalDirectional_FactorIntFunc(dist_thr, dist_offset, !second_orientation,!first_orientation, second_cares, first_cares));
+                        	backward_func = int_funcs.size()-1;
+						}
+
+                        interaction_setup_done = true;
+                    }//END HALF_DIRECTIONAL PARSING
 
                     assert(interaction_setup_done);
                 }

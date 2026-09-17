@@ -8,25 +8,23 @@
     "@DATA@/factors.wtmx",
     "-f",
     "@DATA@/factor_expr.tab",
-    "-i",
-    "@DATA@/factor_info.txt",
     "-c",
     "@DATA@/coop.txt",
+    "-i",
+    "@DATA@/factor_info.txt",
+    "-p",
+    "@TESTDATA@/fitted_direct.par",
     "-o",
     "Rates",
-    "-na",
-    "0",
+    "--check_gradient",
     "-fo",
-    "out.txt",
-    "-po",
-    "par.txt"
+    "out.txt"
   ],
-  "exit_code": 1,
-  "stderr_match": [
-    "Rates model is not implemented"
+  "stdout_match": [
+    "^GRADIENT CHECK (PASSED|FAILED)"
   ],
   "labels": [
     "fast",
-    "error"
+    "gradient"
   ]
 }

@@ -1,1 +1,1 @@
-'NoSuchModel' is not a valid model option (Logistic, Direct, Quenching, ChrMod_Unlimited, ChrMod_Limited, Markov).
+'NoSuchModel' is not a valid model option (Logistic, Direct, Quenching, ChrMod_Unlimited, ChrMod_Limited, Markov, Rates).

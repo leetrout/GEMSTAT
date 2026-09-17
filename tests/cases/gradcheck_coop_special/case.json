@@ -1,0 +1,43 @@
+{
+  "args": [
+    "-s",
+    "@DATA@/seqs.fa",
+    "-e",
+    "@DATA@/expr.tab",
+    "-m",
+    "@DATA@/factors.wtmx",
+    "-f",
+    "@DATA@/factor_expr.tab",
+    "-c",
+    "@ROOT@/examples/04_special_coops/coop.txt",
+    "-i",
+    "@DATA@/factor_info.txt",
+    "-o",
+    "Direct",
+    "-ct",
+    "50",
+    "-rt",
+    "0",
+    "-oo",
+    "SSE",
+    "-onebeta",
+    "-ff",
+    "@ROOT@/examples/04_special_coops/ff.txt",
+    "-lower_bound",
+    "@ROOT@/examples/04_special_coops/lower.par",
+    "-upper_bound",
+    "@ROOT@/examples/04_special_coops/upper.par",
+    "-p",
+    "@ROOT@/examples/04_special_coops/start.par",
+    "--check_gradient",
+    "-fo",
+    "out.txt"
+  ],
+  "stdout_match": [
+    "^GRADIENT CHECK (PASSED|FAILED)"
+  ],
+  "labels": [
+    "fast",
+    "gradient"
+  ]
+}

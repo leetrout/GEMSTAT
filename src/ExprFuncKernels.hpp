@@ -58,7 +58,7 @@ T ExprFunc::kernelOffBasic( const ThermoVals< T >& v ) const
             exit(1);
         }
         const vector< SiteInteraction >& nbrs = left_nbrs[i];
-        const vector< T >& w = v.w_ij[i];
+        const vector< T >& w = v.w[i];
         gemstat_ad::Accumulator< T > acc( sum );
         for ( size_t k = 0; k < nbrs.size(); k++ )
         {
@@ -99,7 +99,7 @@ T ExprFunc::kernelOffChrMod( const ThermoVals< T >& v ) const
     {
         T sum = Zt[ boundaries[i] ];
         const vector< SiteInteraction >& nbrs = left_nbrs[i];
-        const vector< T >& w = v.w_ji[i];
+        const vector< T >& w = v.w[i];
         const bool rep_i = repIndicators[ sites[i].factorIdx ];
         gemstat_ad::Accumulator< T > acc0( sum );
         for ( size_t k = 0; k < nbrs.size(); k++ )
@@ -141,7 +141,7 @@ T ExprFunc::kernelOnDirect( const ThermoVals< T >& v ) const
     for ( int i = 1; i <= n; i++ )
     {
         const vector< SiteInteraction >& nbrs = left_nbrs[i];
-        const vector< T >& w = v.w_ji[i];
+        const vector< T >& w = v.w[i];
         gemstat_ad::Accumulator< T > acc( Zt[ boundaries[i] ] );
         for ( size_t k = 0; k < nbrs.size(); k++ )
         {
@@ -175,7 +175,7 @@ T ExprFunc::kernelOnQuenching( const ThermoVals< T >& v ) const
     for ( int i = 0; i <= n; i++ )
     {
         const vector< SiteInteraction >& nbrs = all_left_nbrs[i];
-        const vector< T >& w = v.all_w_ji[i];
+        const vector< T >& w = v.all_w[i];
         gemstat_ad::Accumulator< T > acc1( T( 1.0 ) ), acc0( T( 0.0 ) );
         for ( size_t kk = 0; kk < nbrs.size(); kk++ )
         {
@@ -200,7 +200,7 @@ T ExprFunc::kernelOnQuenching( const ThermoVals< T >& v ) const
                 continue;
             }
             const vector< SiteInteraction >& nbrs = all_left_nbrs[i];
-            const vector< T >& w = v.all_w_ji[i];
+            const vector< T >& w = v.all_w[i];
             gemstat_ad::Accumulator< T > acc1( T( 0.0 ) ), acc0( T( 0.0 ) );
             for ( size_t kk = 0; kk < nbrs.size(); kk++ )
             {
@@ -249,7 +249,7 @@ T ExprFunc::kernelOnChrModUnlimited( const ThermoVals< T >& v ) const
     {
         T sum = Zt[ boundaries[i] ];
         const vector< SiteInteraction >& nbrs = left_nbrs[i];
-        const vector< T >& w = v.w_ji[i];
+        const vector< T >& w = v.w[i];
         const bool rep_i = repIndicators[ sites[i].factorIdx ];
         gemstat_ad::Accumulator< T > acc0( sum );
         for ( size_t k = 0; k < nbrs.size(); k++ )
@@ -304,7 +304,7 @@ T ExprFunc::kernelOnChrModLimited( const ThermoVals< T >& v ) const
         for ( int i = 1; i <= n; i++ )
         {
             const vector< SiteInteraction >& nbrs = left_nbrs[i];
-            const vector< T >& w = v.w_ji[i];
+            const vector< T >& w = v.w[i];
             const bool rep_i = repIndicators[ sites[i].factorIdx ];
 
             T sum0, sum0A( 0.0 ), sum1;
@@ -393,7 +393,7 @@ T ExprFunc::kernelMarkov( const ThermoVals< T >& v ) const
     for ( int i = 1; i <= n; i++ )
     {
         const vector< SiteInteraction >& nbrs = left_nbrs[i];
-        const vector< T >& w = v.w_ij[i];
+        const vector< T >& w = v.w[i];
         gemstat_ad::Accumulator< T > acc( Zt[ boundaries[i] ] );
         for ( size_t k = 0; k < nbrs.size(); k++ )
         {
@@ -408,7 +408,7 @@ T ExprFunc::kernelMarkov( const ThermoVals< T >& v ) const
     for ( int i = n; i >= 1; i-- )
     {
         const vector< SiteInteraction >& nbrs = right_nbrs[i];
-        const vector< T >& w = v.right_w_ij[i];
+        const vector< T >& w = v.right_w[i];
         gemstat_ad::Accumulator< T > acc( backward_Zt[ rev_bounds[i] ] );
         for ( size_t k = 0; k < nbrs.size(); k++ )
         {
@@ -426,8 +426,8 @@ T ExprFunc::kernelMarkov( const ThermoVals< T >& v ) const
     {
         T one_final_Z = Z[i] * backward_Z_sum[i];
         T bindprob = one_final_Z / backward_Zt[1];
-        assert( bindprob >= 0.0 );
-        assert( bindprob <= 1.0 );
+        if ( bindprob < 0.0 ) bindprob = T( 0.0 );        // guard against roundoff outside [0, 1]
+        else if ( bindprob > 1.0 ) bindprob = T( 1.0 );
 
         T log_effect( 0.0 );
         if ( actIndicators[ sites[ i ].factorIdx ] )
@@ -447,7 +447,7 @@ T ExprFunc::kernelMarkov( const ThermoVals< T >& v ) const
 template< class T >
 T ExprFunc::factorIntAffine( const Site& a, const Site& b, const T& normalInt ) const
 {
-    double dist = abs( b.start - a.start );
+    double dist = a.start <= b.start ? ( SITE_DISTANCE( a, b ) ) : ( SITE_DISTANCE( b, a ) );
     FactorIntFunc* an_int_func = expr_model->coop_setup->coop_func_for( a.factorIdx, b.factorIdx );
     double scale, offset, post;
     bool clamp_to_one;

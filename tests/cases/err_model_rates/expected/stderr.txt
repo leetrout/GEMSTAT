@@ -1,1 +1,0 @@
-The Rates model is not implemented in this version.

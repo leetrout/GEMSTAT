@@ -77,6 +77,7 @@ ExprFunc::ExprFunc( const ExprModel* _model, const ExprPar& _par , const SiteVec
     plain.txpEffects.assign( txpEffects.begin(), txpEffects.end() );
     plain.repEffects.assign( repEffects.begin(), repEffects.end() );
     plain.basal = par.getPromoterData( seq_number ).basal_trans;
+    plain.pi = par.getPromoterData( seq_number ).pi;
     this->fillPlainWeights();
 }
 
@@ -90,11 +91,10 @@ void ExprFunc::buildLeftNeighbours( bool within_boundaries, vector< vector< Site
         for ( int j = j_begin; j < i; j++ )
         {
             if ( siteOverlap( sites[ i ], sites[ j ], motifs ) ) continue;
-            SiteInteraction si;
+            SiteInteraction si;                    // j is the earlier site, i the later one
             si.j = j;
-            si.dist = sites[i].start - sites[j].start;
-            si.w_ij = compFactorInt( sites[ i ], sites[ j ] );
-            si.w_ji = compFactorInt( sites[ j ], sites[ i ] );
+            si.dist = SITE_DISTANCE( sites[j], sites[i] );
+            si.w = compFactorInt( sites[ j ], sites[ i ] );
             si.rep_ij = testRepression( sites[ i ], sites[ j ] );
             si.rep_ji = testRepression( sites[ j ], sites[ i ] );
             out[i].push_back( si );
@@ -102,32 +102,21 @@ void ExprFunc::buildLeftNeighbours( bool within_boundaries, vector< vector< Site
     }
 }
 
+static void copy_weights( const vector< vector< ExprFunc::SiteInteraction > >& nbrs, vector< vector< gemstat_dp_t > >& out )
+{
+    out.assign( nbrs.size(), vector< gemstat_dp_t >() );
+    for ( size_t i = 0; i < nbrs.size(); i++ )
+    {
+        out[i].resize( nbrs[i].size() );
+        for ( size_t k = 0; k < nbrs[i].size(); k++ ) out[i][k] = nbrs[i][k].w;
+    }
+}
+
 void ExprFunc::fillPlainWeights()
 {
-    plain.w_ij.assign( left_nbrs.size(), vector< gemstat_dp_t >() );
-    plain.w_ji.assign( left_nbrs.size(), vector< gemstat_dp_t >() );
-    for ( size_t i = 0; i < left_nbrs.size(); i++ )
-    {
-        plain.w_ij[i].resize( left_nbrs[i].size() );
-        plain.w_ji[i].resize( left_nbrs[i].size() );
-        for ( size_t k = 0; k < left_nbrs[i].size(); k++ )
-        {
-            plain.w_ij[i][k] = left_nbrs[i][k].w_ij;
-            plain.w_ji[i][k] = left_nbrs[i][k].w_ji;
-        }
-    }
-    plain.all_w_ji.assign( all_left_nbrs.size(), vector< gemstat_dp_t >() );
-    for ( size_t i = 0; i < all_left_nbrs.size(); i++ )
-    {
-        plain.all_w_ji[i].resize( all_left_nbrs[i].size() );
-        for ( size_t k = 0; k < all_left_nbrs[i].size(); k++ ) plain.all_w_ji[i][k] = all_left_nbrs[i][k].w_ji;
-    }
-    plain.right_w_ij.assign( right_nbrs.size(), vector< gemstat_dp_t >() );
-    for ( size_t i = 0; i < right_nbrs.size(); i++ )
-    {
-        plain.right_w_ij[i].resize( right_nbrs[i].size() );
-        for ( size_t k = 0; k < right_nbrs[i].size(); k++ ) plain.right_w_ij[i][k] = right_nbrs[i][k].w_ij;
-    }
+    copy_weights( left_nbrs, plain.w );
+    copy_weights( all_left_nbrs, plain.all_w );
+    copy_weights( right_nbrs, plain.right_w );
 }
 
 ThermoVals< gemstat_ad_t > ExprFunc::makeVals( const vector< gemstat_ad_t >& flat, const ExprPar& par_index ) const
@@ -173,44 +162,57 @@ ThermoVals< gemstat_ad_t > ExprFunc::makeVals( const vector< gemstat_ad_t >& fla
         normalInt[a][b] = normalInt[b][a] = get( index );
     }
 
-    v.w_ij.assign( left_nbrs.size(), vector< V >() );
-    v.w_ji.assign( left_nbrs.size(), vector< V >() );
+    v.w.assign( left_nbrs.size(), vector< V >() );
     for ( size_t i = 0; i < left_nbrs.size(); i++ )
     {
-        v.w_ij[i].resize( left_nbrs[i].size() );
-        v.w_ji[i].resize( left_nbrs[i].size() );
+        v.w[i].resize( left_nbrs[i].size() );
         for ( size_t k = 0; k < left_nbrs[i].size(); k++ )
         {
             int j = left_nbrs[i][k].j;
-            const V& n_int = normalInt[ sites[i].factorIdx ][ sites[j].factorIdx ];
-            v.w_ij[i][k] = factorIntAffine( sites[i], sites[j], n_int );
-            v.w_ji[i][k] = factorIntAffine( sites[j], sites[i], n_int );
+            v.w[i][k] = factorIntAffine( sites[j], sites[i], normalInt[ sites[j].factorIdx ][ sites[i].factorIdx ] );
         }
     }
-    v.all_w_ji.assign( all_left_nbrs.size(), vector< V >() );
+    v.all_w.assign( all_left_nbrs.size(), vector< V >() );
     for ( size_t i = 0; i < all_left_nbrs.size(); i++ )
     {
-        v.all_w_ji[i].resize( all_left_nbrs[i].size() );
+        v.all_w[i].resize( all_left_nbrs[i].size() );
         for ( size_t k = 0; k < all_left_nbrs[i].size(); k++ )
         {
             int j = all_left_nbrs[i][k].j;
-            v.all_w_ji[i][k] = factorIntAffine( sites[j], sites[i], normalInt[ sites[i].factorIdx ][ sites[j].factorIdx ] );
+            v.all_w[i][k] = factorIntAffine( sites[j], sites[i], normalInt[ sites[j].factorIdx ][ sites[i].factorIdx ] );
         }
     }
-    v.right_w_ij.assign( right_nbrs.size(), vector< V >() );
+    v.right_w.assign( right_nbrs.size(), vector< V >() );
     for ( size_t i = 0; i < right_nbrs.size(); i++ )
     {
-        v.right_w_ij[i].resize( right_nbrs[i].size() );
+        v.right_w[i].resize( right_nbrs[i].size() );
         for ( size_t k = 0; k < right_nbrs[i].size(); k++ )
         {
             int j = right_nbrs[i][k].j;
-            v.right_w_ij[i][k] = factorIntAffine( sites[i], sites[j], normalInt[ sites[i].factorIdx ][ sites[j].factorIdx ] );
+            v.right_w[i][k] = factorIntAffine( sites[i], sites[j], normalInt[ sites[i].factorIdx ][ sites[j].factorIdx ] );
         }
     }
 
-    // basal transcription, through ExprPar's own choice of slot for this sequence
+    // promoter parameters, through ExprPar's own choice of slot for this sequence
     v.basal = get( par_index.getPromoterData( seq_number ).basal_trans );
+    v.pi = get( par_index.getPromoterData( seq_number ).pi );
     return v;
+}
+
+/*
+ * How far apart two sites can be and still interact.  Every site further away
+ * than this from site i is folded into the running total Zt[boundaries[i]],
+ * which assumes it cannot overlap site i.  Sites are ordered by start, so a
+ * site that starts before the boundary site may still end after it: the range
+ * is therefore never less than the longest motif, otherwise a window narrower
+ * than a motif (e.g. -ct 0 -rt 0) would let overlapping configurations into
+ * the total.
+ */
+double ExprFunc::interactionRange() const
+{
+    double range = max( (double)expr_model->get_longest_coop_thr(), (double)repressionDistThr );
+    for ( size_t f = 0; f < motifs.size(); f++ ) range = max( range, (double)motifs[f].length() );
+    return range;
 }
 
 void ExprFunc::setupSitesAndBoundaries(const SiteVec& _sites, int length, int seq_num){
@@ -238,13 +240,13 @@ void ExprFunc::setupSitesAndBoundaries(const SiteVec& _sites, int length, int se
 
   boundaries.resize(n_sites+2);
   boundaries[0] = 0;//value for starting pseudosite
-  double range = max( (double)expr_model->get_longest_coop_thr(), (double)repressionDistThr );
+  double range = interactionRange();
   for ( int i = 1; i <= n; i++ )
   {
       int j;
       for ( j = i - 1; j >= 1; j-- )
       {
-          if ( ( sites[i].start - sites[j].start ) > range ) break;
+          if ( SITE_DISTANCE( sites[j], sites[i] ) > range ) break;
       }//If the loop never broke, j will leak with value 0.
       int boundary = j;
       boundaries[i] = ( boundary );
@@ -336,7 +338,7 @@ Markov_ExprFunc::Markov_ExprFunc( const ExprModel* _model, const ExprPar& _par ,
     cerr << "running Markov_ExprFunc::setupSitesAndBoundaries(...)" << endl;
     #endif
 
-    double range = max( (double)expr_model->get_longest_coop_thr(), (double)repressionDistThr );
+    double range = interactionRange();
     rev_bounds.resize(n_sites+2);
     rev_bounds[n_sites] = n_sites+1; //last true site points to pseudosite
     rev_bounds[0] = 1; // first pseudosite has reverse boundary pointing to first true site
@@ -345,7 +347,7 @@ Markov_ExprFunc::Markov_ExprFunc( const ExprModel* _model, const ExprPar& _par ,
         int j;
         for ( j = i+1; j <= n_sites; j++ )
         {
-            if ( ( sites[j].start - sites[i].start) > range ) break;
+            if ( SITE_DISTANCE( sites[i], sites[j] ) > range ) break;
         }//If the loop never broke, j will leak with value n+1
         int boundary = j;
         rev_bounds[i] = ( boundary );
@@ -358,11 +360,10 @@ Markov_ExprFunc::Markov_ExprFunc( const ExprModel* _model, const ExprPar& _par ,
         for ( int j = rev_bounds[i] - 1; j > i; j-- )
         {
             if ( siteOverlap( sites[ i ], sites[ j ], motifs ) ) continue;
-            SiteInteraction si;
+            SiteInteraction si;                    // i is the earlier site, j the later one
             si.j = j;
-            si.dist = sites[j].start - sites[i].start;
-            si.w_ij = compFactorInt( sites[ i ], sites[ j ] );
-            si.w_ji = compFactorInt( sites[ j ], sites[ i ] );
+            si.dist = SITE_DISTANCE( sites[i], sites[j] );
+            si.w = compFactorInt( sites[ i ], sites[ j ] );
             si.rep_ij = testRepression( sites[ i ], sites[ j ] );
             si.rep_ji = testRepression( sites[ j ], sites[ i ] );
             right_nbrs[i].push_back( si );
@@ -423,11 +424,17 @@ gemstat_ad_t ChrModLimited_ExprFunc::compPartFuncOnAD( const ThermoVals< gemstat
  * Pairwise terms
  ******************************************************/
 
+// the gap between two non-overlapping sites, whichever order they are given in
+static inline int site_gap( const Site& a, const Site& b )
+{
+    return a.start <= b.start ? ( SITE_DISTANCE( a, b ) ) : ( SITE_DISTANCE( b, a ) );
+}
+
 double ExprFunc::compFactorInt( const Site& a, const Site& b ) const
 {
     // 	assert( !siteOverlap( a, b, motifs ) );
     double maxInt = factorIntMat( a.factorIdx, b.factorIdx );
-    double dist = abs( b.start - a.start );
+    double dist = site_gap( a, b );
     //bool orientation = ( a.strand == b.strand );
 
     FactorIntFunc* an_int_func = expr_model->coop_setup->coop_func_for(a.factorIdx, b.factorIdx);
@@ -439,6 +446,6 @@ bool ExprFunc::testRepression( const Site& a, const Site& b ) const
 {
     // 	assert( !siteOverlap( a, b, motifs ) );
 
-    double dist = abs( b.start - a.start  );
+    double dist = site_gap( a, b );
     return repressionMat( a.factorIdx, b.factorIdx ) && ( dist <= repressionDistThr );
 }

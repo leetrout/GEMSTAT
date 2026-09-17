@@ -32,7 +32,7 @@ Explanation of parameters:
 
 -fo <output_file>: required, the output file, the predicted expression patterns of all sequences as well as the observed expression patterns (alternating, the first row is the observed and the second the predicted). 
 
--o <model_option>: the sequence-to-expression model. Options are: Logistic, Direct (DirectInt model), ChrMod_Unlimited (SRR model with N_MA = inf), ChrMod_Limited (SRR model with finite N_MA). 
+-o <model_option>: the sequence-to-expression model. Options are: Logistic, Direct (DirectInt model), ChrMod_Unlimited (SRR model with N_MA = inf), ChrMod_Limited (SRR model with finite N_MA), Quenching, Markov, Rates (two-arc model: q_btm scales one arc and the "pi" promoter parameter the other; expression is 2 pA pB / (pA + pB)). 
 
 -c <coop_file>: the list of cooperative interactions. One line per cooperative pair. If not specified, then no cooperative interaction is allowed. See data/coop_file. 
 
@@ -51,6 +51,12 @@ Explanation of parameters:
 -ct <coopDistThr>: the distance threshold of cooperative interactions. Default = 50 bp. 
 
 -rt <repressionDistThr>: the distance threshold of short range repression. Default = 150 bp. 
+
+-signal <signal_file>: a matrix of signalling inputs (same format and conditions as factor_expr_file). TF concentrations are then derived from the parameters under "signaling" in the parameter file (CIC attenuation by dperk, pMad from dpp and mad). With this option the gradient falls back to finite differences.
+
+-reg_centers <par_file>, -l1_weights <par_file>, -l2_weights <par_file>: per-parameter regularization centers and L1/L2 strengths, in parameter-file format (the -l1/-l2 options set one strength for every parameter).
+
+Distances between sites are measured as the gap between them: from the end of the earlier site to the start of the later one.
 
 --gradient <ad|fd>: how the gradient for the gradient-based optimizer (L-BFGS) is computed. "ad" (default) is reverse-mode automatic differentiation through the partition functions: exact, and its cost does not grow with the number of parameters. "fd" is the forward-difference approximation of earlier versions (one extra objective evaluation per free parameter), kept for comparison.
 

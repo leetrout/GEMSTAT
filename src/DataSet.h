@@ -30,6 +30,9 @@ public:
   virtual int n_rows_input() const;
 
   virtual Condition getCondition(int i , const ExprPar &signalling_params) const;
+  // true when getCondition() uses signalling_params: the reverse-mode gradient
+  // treats the conditions as constants and cannot be used in that case
+  virtual bool conditions_depend_on_parameters() const { return false; }
   virtual vector< double > get_output_row(int i) const;
   virtual vector< double > get_output_col(int j) const;
   virtual const Matrix& get_output_matrix() const;

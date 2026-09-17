@@ -34,7 +34,9 @@
 
 #include "ObjFunc.h"
 
-#include <stdexcept>
+#include "DataSet_signal.h"
+
+#include "regularization.hpp"
 
 int main( int argc, char* argv[] )
 {
@@ -45,6 +47,8 @@ int main( int argc, char* argv[] )
     string factor_thr_file;
     string par_out_file; // the learned parameters will get stored here
     ofstream par_out_stream; // Uninitialized at first.
+
+    string signaling_filename;
 
     string train_weights_filename;
     bool train_weights_loaded = false;
@@ -63,8 +67,6 @@ int main( int argc, char* argv[] )
     bool read_par_init_file = false;
 
     ObjType cmdline_obj_option = SSE;
-    double l1 = 0.0;
-    double l2 = 0.0;
 
     bool cmdline_one_qbtm_per_crm = false;
     bool cmdline_one_beta = false;
@@ -165,10 +167,6 @@ int main( int argc, char* argv[] )
 	    par_out_file = argv[ ++i ]; //output file for pars at the en
   else if ( !strcmp("-onebeta", argv[ i ]))
       cmdline_one_beta = true;
-  else if ( !strcmp("-l1", argv[ i ]))
-      l1 = atof(argv[ ++i ]);
-  else if ( !strcmp("-l2", argv[ i ]))
-      l2 = atof(argv[ ++i ]);
 	else if ( !strcmp("-lower_bound", argv[ i ]))
 	    lower_bound_file = argv[ ++i ];
   else if ( !strcmp("-upper_bound", argv[ i ]))
@@ -179,6 +177,9 @@ int main( int argc, char* argv[] )
             cmdline_interaction_option_str = argv[ ++i ];
     else if( !strcmp("-train_weights", argv[ i ]))
         train_weights_filename = argv[ ++i ];
+    else if( !strcmp("-signal", argv[ i ]) ){
+        signaling_filename = argv[ ++i ];
+        }
     }
 
     if ( seqFile.empty() || exprFile.empty() || motifFile.empty() || factorExprFile.empty() || outFile.empty() || ( ( cmdline_modelOption == QUENCHING || cmdline_modelOption == CHRMOD_UNLIMITED || cmdline_modelOption == CHRMOD_LIMITED ) &&  factorInfoFile.empty() ) || ( cmdline_modelOption == QUENCHING && repressionFile.empty() ) )
@@ -279,7 +280,25 @@ int main( int argc, char* argv[] )
     ASSERT_MESSAGE( factorExprData.nCols() == nConds , "Number of columns in factor expression data differs from the number of conditions.");
 
     //Initialize the dataset that is actually provided
-    TrainingDataset *training_dataset = new TrainingDataset(factorExprData,exprData);
+    Matrix signal_data_matrix;
+    TrainingDataset *training_dataset = NULL;
+    if( signaling_filename.empty() ){
+        training_dataset = new TrainingDataset(factorExprData,exprData);
+    }else{
+    //if( !signaling_filename.empty() ){
+        vector<string> tmp_labels(labels);
+        data.clear();
+        labels.clear();
+        rval = readMatrix( signaling_filename, labels, condNames, data );
+        ASSERT_MESSAGE( rval != RET_ERROR , "Could not read the signal data matrix");
+        signal_data_matrix = Matrix( data );
+        ASSERT_MESSAGE( factorExprData.nCols() == signal_data_matrix.nCols(), "The signaling data had a different number of columns than the factor expression data.");
+        training_dataset = new DataSet_Signal(factorExprData,exprData, signal_data_matrix);
+
+        ((DataSet_Signal*)training_dataset)->set_row_names(tmp_labels);
+        ((DataSet_Signal*)training_dataset)->set_signal_row_names(labels);
+        cerr << "Created a signaling dataset." << endl;
+    }
 
     //****** MODEL ********
 
@@ -318,7 +337,7 @@ int main( int argc, char* argv[] )
         intOption = getIntOption(cmdline_interaction_option_str);
         if ( intOption == BINARY ) default_int_func = new FactorIntFuncBinary( coopDistThr );
         else if ( intOption == GAUSSIAN ) default_int_func = new FactorIntFuncGaussian( coopDistThr, factorIntSigma );
-        else if ( intOption == HELICAL ) default_int_func = new FactorIntFuncHelical( coopDistThr );
+        else if ( intOption == HELICAL ) default_int_func = new Helical_FactorIntFunc( coopDistThr, 0.0 );
         else
         {
             cerr << "Interaction Function is invalid " << endl; exit( 1 );
@@ -343,7 +362,7 @@ int main( int argc, char* argv[] )
 
     //Deleted AXIS_WEIGHTS from here
 
-    cerr << "Created the parameter factory...";
+    cerr << "creating the parameter factory...";
     //Setup a parameter factory
     ParFactory *param_factory = new ParFactory(expr_model, nSeqs);//This param_factory is used for loading/unloading, it should be unconstrained.
     cerr << "DONE." << endl;
@@ -366,6 +385,8 @@ int main( int argc, char* argv[] )
           //The loader returns Logistic-model parameters in ENERGY_SPACE. Everything
           //below (in particular reading annot_thresh out of par_init) expects PROB_SPACE.
           par_init = param_factory->changeSpace( par_init, PROB_SPACE );
+          //A loaded file may carry extra parameters (e.g. "signaling"): they become part of the parameter set.
+          param_factory->prototype = gsparams::DictList(par_init.my_pars);
           read_par_init_file = true;
 	  }catch (exception& e){
             cerr << "Cannot read parameters from " << parFile << endl;
@@ -622,6 +643,8 @@ int main( int argc, char* argv[] )
     // create the expression predictor
     ExprPredictor* predictor = new ExprPredictor( seqs, seqSites, seqLengths, training_dataset, motifs, expr_model, indicator_bool, motifNames );
     //And setup parameters from the commandline
+    delete predictor->param_factory;
+    predictor->param_factory = param_factory;
     predictor->search_option = cmdline_search_option;
     predictor->set_objective_option(cmdline_obj_option);
     predictor->n_alternations = cmdline_n_alternations;
@@ -647,36 +670,10 @@ int main( int argc, char* argv[] )
     }
 
 
-    //Setup regularization objective function
-    ExprPar tmp_centers, tmp_l1, tmp_l2;
-    bool setup_regularization = false;
-    if(0.0 != l1 || 0.0 != l2){
-        setup_regularization = true;
-      cerr << "INFO: Regularization was turned on and will be used. l1 = " << l1 << " l2 = " << l2 << " ."<< endl;
-
-      tmp_centers = predictor->param_factory->create_expr_par();
-      tmp_l1 = predictor->param_factory->create_expr_par();
-      tmp_l2 = predictor->param_factory->create_expr_par();
-
-      //TODO: add an option to read l1 and l2 values from a file.
-      vector< double > tmp_l12_vector;
-      tmp_l1.getRawPars(tmp_l12_vector);
-      std::fill(tmp_l12_vector.begin(),tmp_l12_vector.end(),l1);
-      tmp_l1 = predictor->param_factory->create_expr_par(tmp_l12_vector, ENERGY_SPACE);
-
-      tmp_l2.getRawPars(tmp_l12_vector);
-      std::fill(tmp_l12_vector.begin(),tmp_l12_vector.end(),l2);
-      tmp_l2 = predictor->param_factory->create_expr_par(tmp_l12_vector, ENERGY_SPACE);
-
-
-      RegularizedObjFunc *tmp_reg_obj_func = new RegularizedObjFunc(predictor->trainingObjective,
-                                              tmp_centers,
-                                              tmp_l1,
-                                              tmp_l2
-                                            );
-      predictor->trainingObjective = tmp_reg_obj_func;
-    }
-
+    //Regularization Aspect
+    regularization_cmndline_init(predictor, argc, argv );
+    
+    //optimization bounds
     if(upper_bound_par_read){
     	predictor->param_factory->setMaximums(upper_bound_par);
     }
@@ -694,12 +691,8 @@ int main( int argc, char* argv[] )
     all_loaded_params.push_back(std::make_pair("free_fix",&(param_ff.my_pars)));
     all_loaded_params.push_back(std::make_pair("lower_bounds",&(lower_bound_par.my_pars)));
     all_loaded_params.push_back(std::make_pair("upper_bounds",&(upper_bound_par.my_pars)));
-    /*Only if using l1/l2 regularization*/
-    if(setup_regularization){
-        all_loaded_params.push_back(std::make_pair("reg_centers",&(tmp_centers.my_pars)));
-        all_loaded_params.push_back(std::make_pair("l1_weights",&(tmp_l1.my_pars)));
-        all_loaded_params.push_back(std::make_pair("l2_weights",&(tmp_l2.my_pars)));
-    }
+    
+    //regularization related par files are checked in the appropriate function.
 
     for(int i = 0;i<all_loaded_params.size();i++){
         gsparams::DictList::iterator itr = all_loaded_params[i].second->begin();

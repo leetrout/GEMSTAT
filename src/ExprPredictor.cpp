@@ -13,6 +13,7 @@
 #include "ExprPredictor.h"
 #include "ExprPar.h"
 #include "ExprFunc.h"
+#include "ExprFunc_rates.h"
 
 double nlopt_obj_func( const vector<double> &x, vector<double> &grad, void* f_data);
 
@@ -89,7 +90,6 @@ ExprPredictor::ExprPredictor( const vector <Sequence>& _seqs, const vector< Site
 	trainingObjective = NULL;
 
 	gradient_method = GRADIENT_AD;
-	par_index = param_factory->create_index_par();
 
 	maxShift = 5;
 	shiftPenalty = 0.8;
@@ -589,13 +589,13 @@ void gsl_obj_df( const gsl_vector* v, void* params, gsl_vector* grad )
 void gsl_obj_df( const gsl_vector* v, void* params, gsl_vector* grad, double f_val )
 {
     ExprPredictor* predictor = (ExprPredictor*)params;
-    if ( predictor->gradient_method == ExprPredictor::GRADIENT_AD ) gsl_obj_df_ad( v, params, grad );
+    if ( predictor->gradient_method == ExprPredictor::GRADIENT_AD && predictor->autodiff_available() ) gsl_obj_df_ad( v, params, grad );
     else gsl_obj_df_fd( v, params, grad, f_val );
 }
 
 void gsl_obj_df_fd( const gsl_vector* v, void* params, gsl_vector* grad, double f_val )
 {
-    double step = 1.0E-6;
+    double step = 1.0E-8;
     numeric_deriv( grad, gsl_obj_f, v, params, step, f_val );
 }
 
@@ -642,6 +642,7 @@ void ExprPredictor::gradient_prob( const ExprPar& par, vector< double >& grad ) 
     this->predict_all( par, predictions );
     vector< vector< double > > d_pred;
     vector< double > d_pars( n_pars, 0.0 );
+    const ExprPar par_index = param_factory->create_index_par();   // the factory (and its prototype) may have been replaced since construction
     trainingObjective->gradient( ground_truths, predictions, &par, &par_index, d_pred, d_pars );
 
     // zero-weighted bins are not predicted during training (see predict())
@@ -706,8 +707,21 @@ void ExprPredictor::gradient_prob( const ExprPar& par, vector< double >& grad ) 
         for ( int k = 0; k < n_pars; k++ ) grad[k] += seq_grad[i][k];
 }
 
+bool ExprPredictor::autodiff_available() const
+{
+    // the differentiated computation starts at the TF concentrations of each
+    // condition; a dataset that derives those from the parameters (signalling)
+    // would leave that dependence out of the gradient
+    return !training_data->conditions_depend_on_parameters();
+}
+
 bool ExprPredictor::checkGradient( const ExprPar& par_init, ostream& os, double tol )
 {
+    if ( !autodiff_available() )
+    {
+        os << "GRADIENT CHECK SKIPPED: this dataset derives conditions from the parameters, so finite differences are used instead of automatic differentiation" << endl;
+        return true;
+    }
     par_model = par_init;
     ExprPar tmp_par_model = param_factory->changeSpace( par_model, ENERGY_SPACE );
     param_factory->separateParams( tmp_par_model, free_pars, fix_pars, indicator_bool );

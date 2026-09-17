@@ -4,6 +4,10 @@ cmake_minimum_required(VERSION 3.20)
 
 #The configure file from the old autotools build...
 configure_file(config.h.in config.h)
+# The per-sequence scale beta is an ordinary model parameter that the objective
+# uses ("together" in the old --with-beta-optimize terms). ObjFunc.cpp refuses
+# to build without it.
+add_compile_definitions(BETAOPTTOGETHER)
 
 #required packages
 find_package(GSL REQUIRED)
@@ -33,17 +37,9 @@ add_subdirectory("tools")
 
 add_subdirectory("annotation")
 
+add_subdirectory("aspects")
 
-add_library(gem_everything DataSet.cpp ExprFunc.cpp ExprModel.cpp ExprPar.cpp ExprPredictor.cpp FactorIntFunc.cpp IO.cpp ObjFunc.cpp PredictorTrainer.cpp)
-
-if(GEMSTAT_BETA_OPTIMIZE STREQUAL "together")
-    target_compile_definitions(gem_everything PUBLIC BETAOPTTOGETHER)
-elseif(GEMSTAT_BETA_OPTIMIZE STREQUAL "separate")
-    # nothing defined: the objective functions solve for beta themselves
-else()
-    message(FATAL_ERROR "GEMSTAT_BETA_OPTIMIZE must be 'together' or 'separate', got '${GEMSTAT_BETA_OPTIMIZE}'")
-endif()
-message(STATUS "GEMSTAT_BETA_OPTIMIZE = ${GEMSTAT_BETA_OPTIMIZE}")
+add_library(gem_everything DataSet.cpp ExprFunc.cpp ExprFunc_rates.cpp ExprModel.cpp ExprPar.cpp ExprPredictor.cpp FactorIntFunc.cpp IO.cpp ObjFunc.cpp PredictorTrainer.cpp)
 
 # Sequences are predicted independently of each other inside every objective
 # evaluation; with OpenMP they are predicted in parallel (see --threads).
@@ -62,12 +58,17 @@ target_link_libraries(gem_everything snot)
 target_link_libraries(gem_everything "nlopt")#should get includes
 target_include_directories(gem_everything PUBLIC ${NLOPT_INCLUDE_DIRS})
 
+#Signalling extensions
+add_library(GS_signalling DataSet_signal.cpp DataSet_signal.h)
+target_link_libraries(GS_signalling GS_tools GS_annot)
 
 #
 ############# BINARIES ####################
 #
 # add the executables
-add_executable(seq2expr seq2expr.cpp)
+add_executable(seq2expr "seq2expr.cpp")
+target_link_libraries(seq2expr main_aspects)
 target_link_libraries(seq2expr gem_everything GS_annot GS_tools)
+target_link_libraries(seq2expr GS_signalling)
 target_link_libraries(seq2expr ${NLOPT_LIBRARIES} "nlopt")
 target_link_libraries(seq2expr ${GSL_LIBRARIES})

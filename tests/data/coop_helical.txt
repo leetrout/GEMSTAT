@@ -1,0 +1,3 @@
+bcd	bcd	HELICAL_DIRECTIONAL	30	0	+	-
+hb	kni	HELICAL_DIRECTIONAL	40	2.5	+	-
+cad	cad	SIMPLE	25

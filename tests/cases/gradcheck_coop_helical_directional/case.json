@@ -1,0 +1,32 @@
+{
+  "args": [
+    "-s",
+    "@DATA@/seqs.fa",
+    "-e",
+    "@DATA@/expr.tab",
+    "-m",
+    "@DATA@/factors.wtmx",
+    "-f",
+    "@DATA@/factor_expr.tab",
+    "-c",
+    "@TESTDATA@/coop_helical.txt",
+    "-i",
+    "@DATA@/factor_info.txt",
+    "-o",
+    "Direct",
+    "-int",
+    "Helical",
+    "-p",
+    "@TESTDATA@/fitted_direct.par",
+    "--check_gradient",
+    "-fo",
+    "out.txt"
+  ],
+  "stdout_match": [
+    "^GRADIENT CHECK (PASSED|FAILED)"
+  ],
+  "labels": [
+    "fast",
+    "gradient"
+  ]
+}
